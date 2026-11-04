@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="vi" data-bs-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="techzone-token" content="__TOKEN__">
+  <meta name="theme-color" content="#10233e">
+  <title>TechZone Shop</title>
+  <link rel="stylesheet" href="/vendor/bootstrap.min.css">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/vendor/bootstrap.bundle.min.js"></script>
+  <script defer src="/app.js"></script>
+  <script defer src="/extra.js"></script>
+  <script defer src="/advisor.js"></script>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">T<span>Z</span></span><div><strong>TechZone</strong><small>SHOP WORKSPACE</small></div></div>
+    <button type="button" class="mobile-nav-toggle" id="mobile-nav-toggle" aria-controls="main-nav" aria-expanded="false"><span>☰ &nbsp; Danh mục chức năng</span><span aria-hidden="true">⌄</span></button>
+    <div class="nav-heading">KHÔNG GIAN LÀM VIỆC</div>
+    <nav id="main-nav" aria-label="Điều hướng chính"><div class="nav-group">KHÁM PHÁ</div>
+      <button data-page="dashboard"><span aria-hidden="true">◫</span> Tổng quan</button>
+      <button data-page="catalog" class="active"><span aria-hidden="true">⌕</span> Sản phẩm</button>
+      <button data-page="cart"><span aria-hidden="true">▣</span> Giỏ hàng <span id="cart-count"></span></button>
+      <div class="nav-group">VẬN HÀNH</div>
+      <button data-page="orders"><span aria-hidden="true">☷</span> Đơn hàng &amp; giao hàng</button>
+      <button data-page="inventory"><span aria-hidden="true">▤</span> Kho &amp; nhập hàng</button>
+      <button data-page="warranty"><span aria-hidden="true">◇</span> Bảo hành &amp; RMA</button>
+      <button data-page="compatibility"><span aria-hidden="true">✓</span> Tương thích</button>
+      <div class="nav-group">QUẢN LÝ</div>
+      <button data-page="reports"><span aria-hidden="true">▥</span> Báo cáo</button>
+      <button data-page="admin"><span aria-hidden="true">⚙</span> Quản trị</button>
+      <button data-page="account"><span aria-hidden="true">○</span> Tài khoản</button>
+    </nav>
+    <div class="aside-note"><span class="status-dot"></span><div>Không gian TechZone<small>Dữ liệu lưu trên máy</small></div></div>
+  </aside>
+  <main>
+    <header class="workspace-header"><div><span class="eyebrow">TECHZONE / <span>WORKSPACE</span></span><h1 id="title">Tìm sản phẩm</h1><p class="header-description">Mọi công cụ bạn cần, trong một không gian.</p></div><div class="header-actions"><button type="button" class="header-search" id="header-search" aria-label="Tìm sản phẩm"><span aria-hidden="true">⌕</span><span>Tìm sản phẩm</span><kbd>/</kbd></button><button type="button" class="header-cart" data-page="cart" aria-label="Mở giỏ hàng"><span aria-hidden="true">▣</span><span class="header-cart-label">Giỏ hàng</span><span class="header-cart-count" hidden>0</span></button><button type="button" class="header-account" data-page="account" aria-label="Mở tài khoản"><span aria-hidden="true">○</span></button><label class="role-control">VAI TRÒ<select id="role" class="form-control"><option value="ADMIN">Quản trị viên</option><option value="MANAGER">Quản lý</option><option value="WAREHOUSE">Nhân viên kho</option><option value="SUPPORT">Hỗ trợ</option><option value="SALES">Bán hàng</option><option value="CUSTOMER">Khách hàng</option></select></label></div></header>
+    <div id="notice" role="status" hidden></div>
+    <div id="content" aria-live="polite"></div>
+  </main>
+</div>
+<dialog id="dialog" aria-label="Chi tiết"><div id="dialog-content"></div><button class="secondary" id="close-dialog">Đóng</button></dialog>
+<button id="advisor-toggle" class="advisor-launch" type="button" aria-controls="advisor-panel" aria-expanded="false"><span aria-hidden="true">✦</span> Tư vấn chọn máy</button>
+<section id="advisor-panel" class="advisor-panel" aria-label="Trợ lý tư vấn TechZone" hidden>
+  <header class="advisor-header"><div><strong>✦ Trợ lý TechZone</strong><small>Hỏi đáp và tư vấn linh kiện</small></div><button type="button" id="advisor-close" aria-label="Đóng tư vấn">×</button></header>
+  <div class="advisor-messages" id="advisor-messages" role="log" aria-live="polite" aria-relevant="additions text">
+    <div class="advisor-bubble assistant">Chào bạn! Bạn cần máy để làm gì và ngân sách khoảng bao nhiêu? Ví dụ: “Tư vấn PC chơi game khoảng 35 triệu”.</div>
+  </div>
+  <div class="advisor-suggestions"><button type="button" data-advisor-prompt="Tư vấn cấu hình PC chơi game khoảng 35 triệu">PC chơi game</button><button type="button" data-advisor-prompt="Tôi muốn chọn RAM phù hợp">Tư vấn RAM</button></div>
+  <form id="advisor-form"><label for="advisor-input" class="visually-hidden">Câu hỏi của bạn</label><textarea id="advisor-input" rows="2" maxlength="600" placeholder="Nhập nhu cầu của bạn..." required></textarea><button type="submit" id="advisor-send">Gửi</button></form>
+  <div class="advisor-footer"><span id="advisor-status">Tư vấn dựa trên danh mục hiện có</span><button type="button" id="advisor-clear">Cuộc trò chuyện mới</button></div><p class="advisor-disclaimer">AI có thể nhầm; kiểm tra thông tin trước khi mua.</p>
+</section>
+</body></html>

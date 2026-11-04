@@ -1,0 +1,7 @@
+torch
+torchvision
+Pillow>=12,<13
+pillow-heif>=1.0,<2
+transformers>=4.46,<5
+
+huggingface_hub[hf_xet]>=0.30,<1
