@@ -7,7 +7,6 @@ import javax.imageio.ImageIO;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.net.http.*;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.List;
 

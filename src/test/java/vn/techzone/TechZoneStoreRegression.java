@@ -371,7 +371,9 @@ public final class TechZoneStoreRegression {
                 stockAfter = store.available("GPU-4060");
                 check(store.flushData(), "Lưu dữ liệu vào tệp cục bộ");
                 boolean locked = false;
-                try (DemoStoreRepository ignored = DemoStoreRepository.open(path)) { }
+                try (DemoStoreRepository unexpected = DemoStoreRepository.open(path)) {
+                    throw new AssertionError("A locked repository unexpectedly opened: " + unexpected.dataFile());
+                }
                 catch (java.io.IOException ex) { locked = true; }
                 check(locked, "Không cho hai cửa sổ cùng ghi một tệp");
             }

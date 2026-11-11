@@ -413,7 +413,7 @@ public final class SqliteStore implements AutoCloseable {
     }
 
     private void loadRows(TechZoneStore store,String activeCustomerId) throws Exception {
-        Map<String,ProductVariant> variants=new LinkedHashMap<>();Map<String,String> familyActive=new HashMap<>();
+        Map<String,ProductVariant> variants=new LinkedHashMap<>();
         try(Statement s=db.createStatement();ResultSet r=s.executeQuery("SELECT v.variant_id,v.product_id,p.product_name,v.sku,v.variant_name,p.category,p.brand_name,p.description,v.color,v.price,v.sale_price,v.warranty_months,v.technical_specs,p.is_active,v.is_active,p.created_at,v.updated_at FROM product_variants v JOIN products p ON p.product_id=v.product_id ORDER BY v.variant_id")) {
             while(r.next()){ProductVariant v=new ProductVariant(r.getString(1),r.getString(2),r.getString(3),r.getString(4),r.getString(5),r.getString(6),r.getString(7),r.getString(8),r.getString(9),r.getLong(10),r.getLong(11),r.getInt(12),parseJson(r.getString(13)),r.getInt(14)!=0,r.getInt(15)!=0);v.createdAt=time(r.getString(16));v.updatedAt=time(r.getString(17));variants.put(v.id,v);}
         }

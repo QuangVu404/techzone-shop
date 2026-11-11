@@ -18,7 +18,9 @@ public final class DesignMigrationRollbackRegression {
             s.executeUpdate("INSERT INTO product_specs(product_id,spec_key,spec_value) VALUES('TEST-MISSING-VARIANT','rollback-test','invalid')");
         }
         TechZoneStore seed=new TechZoneStore();boolean failed=false;
-        try { try(SqliteStore ignored=new SqliteStore(path,seed)) { } }
+        try { try(SqliteStore unexpected=new SqliteStore(path,seed)) {
+            throw new AssertionError("Invalid database unexpectedly opened: "+unexpected.databasePath());
+        } }
         catch(SQLException expected) { failed=true; }
         finally { seed.closeRepository(); }
         if(!failed)throw new AssertionError("Migration should reject a broken foreign key");

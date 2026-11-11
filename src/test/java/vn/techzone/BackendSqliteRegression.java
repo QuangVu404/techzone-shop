@@ -41,10 +41,10 @@ public final class BackendSqliteRegression {
         Path path=dir.resolve("test.sqlite"), images=dir.resolve("images");
         TechZoneStore seed=new TechZoneStore(); String orderId;
         try {
-            try(SqliteStore db=new SqliteStore(path,seed); CatalogBackend api=new CatalogBackend(SqliteStore.decode(db.read().bytes()),images,false)) {
+            try(SqliteStore db=new SqliteStore(path,seed); CatalogBackend api=new CatalogBackend(SqliteStore.decode(db.read().bytes()),images,false);
+                RemoteStoreRepository first=new RemoteStoreRepository(api.baseUri(),api.token());
+                RemoteStoreRepository second=new RemoteStoreRepository(api.baseUri(),api.token())) {
                 api.attachDatabase(db);
-                var first=new RemoteStoreRepository(api.baseUri(),api.token());
-                var second=new RemoteStoreRepository(api.baseUri(),api.token());
                 var searchClient=new CatalogClient(api.baseUri(),api.token());
                 var search=searchClient.search("LGA1700 DDR5","Mainboard","LGA1700","DDR5",0,true,java.util.Map.of());
                 check(search.ids().contains("MB-B760-D5") && !search.ids().contains("MB-B760-D4"),"backend search enforces explicit filters");
@@ -326,7 +326,9 @@ public final class BackendSqliteRegression {
                     q.setBytes(1,invalid); q.executeUpdate();
                 }
                 boolean rejected=false;
-                try(SqliteStore ignored=new SqliteStore(corrupt,new TechZoneStore())) { }
+                try(SqliteStore unexpected=new SqliteStore(corrupt,new TechZoneStore())) {
+                    throw new AssertionError("Invalid snapshot unexpectedly opened: "+unexpected.databasePath());
+                }
                 catch(IOException ex) { rejected=true; }
                 check(rejected,"migration rejects an invalid legacy snapshot");
                 try(Connection c=DriverManager.getConnection("jdbc:sqlite:"+corrupt); Statement s=c.createStatement(); ResultSet r=s.executeQuery("SELECT revision,snapshot FROM app_state")) {
@@ -358,10 +360,11 @@ public final class BackendSqliteRegression {
             while(!Files.isRegularFile(session) && process.isAlive() && System.nanoTime()<end) Thread.sleep(100);
             check(Files.isRegularFile(session),"standalone backend must start: "+Files.readString(root.resolve("backend.log")));
             Properties props=new Properties(); try(InputStream in=Files.newInputStream(session)) { props.load(in); }
-            RemoteStoreRepository remote=new RemoteStoreRepository(URI.create(props.getProperty("url")),props.getProperty("token"));
-            TechZoneStore loaded=remote.loadOrCreate();
-            try { check(loaded.balance("GPU-4060").reorderThreshold==17,"imports legacy data into SQLite"); }
-            finally { loaded.closeRepository(); }
+            try(RemoteStoreRepository remote=new RemoteStoreRepository(URI.create(props.getProperty("url")),props.getProperty("token"))) {
+                TechZoneStore loaded=remote.loadOrCreate();
+                try { check(loaded.balance("GPU-4060").reorderThreshold==17,"imports legacy data into SQLite"); }
+                finally { loaded.closeRepository(); }
+            }
             check(Files.isRegularFile(data.resolve("techzone.sqlite")),"standalone creates SQLite database");
             check(Arrays.equals(before,Files.readAllBytes(legacy)),"migration must not change old file");
             process.destroy(); check(process.waitFor(10,TimeUnit.SECONDS),"standalone backend must stop");
