@@ -31,9 +31,19 @@ if (location.search === '?catalog-probe=1') {
       card.querySelector('[data-detail]').click();
       for (let i = 0; i < 30 && !document.querySelector('#dialog[open] .detail-info'); i++) await sleep(200);
       const detail = document.querySelector('#dialog[open] .detail-info');
-      const source = detail?.querySelector('a[href^="https://gearvn.com/products/"]');
+      const addButton = detail?.querySelector('[data-add]');
+      for (let i = 0; i < 40 && (!document.querySelector('#dialog[open] .compatibility-candidates .recommendation-item') || !document.querySelector('#dialog[open] .similar-results .product')); i++) await sleep(200);
+      const similarBefore=document.querySelectorAll('#dialog[open] .similar-results .product').length;
+      document.querySelector('#dialog[open] .similar-results > button')?.click();
+      const similarAfter=document.querySelectorAll('#dialog[open] .similar-results .product').length;
       document.body.dataset.catalogProbe = encodeProbe({initial, filtered, restored,
-        afterDelayedResponse, cardText, detailText: detail?.textContent || '', source: source?.href || '',
+        afterDelayedResponse, cardText, detailText: detail?.textContent || '', addDisabled: !!addButton?.disabled,
+        specText: document.querySelector('#dialog[open] .detail-specs')?.textContent || '',
+        externalLinks: detail?.querySelectorAll('a[href^="https://gearvn.com/"]').length || 0,
+        advisorLeft: document.querySelector('#advisor-toggle').getBoundingClientRect().left,
+        candidatesText: document.querySelector('#dialog[open] .compatibility-candidates')?.textContent || '',
+        candidatesCount: document.querySelectorAll('#dialog[open] .compatibility-candidates .recommendation-item').length,
+        similarBefore, similarAfter,
         query: document.querySelector('#search input[name=query]').value,
         allSelected: document.querySelector('[data-category=""]').getAttribute('aria-pressed')});
     } catch (error) {

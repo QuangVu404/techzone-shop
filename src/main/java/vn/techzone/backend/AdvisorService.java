@@ -155,7 +155,7 @@ public final class AdvisorService {
                             && (!query.contains("intel") || p.brand.equalsIgnoreCase("Intel")))
                     .sorted(order).limit(4).toList();
             return new Answer(found.isEmpty()?"Mình chưa tìm thấy sản phẩm còn hàng phù hợp với các điều kiện bạn đưa ra. Bạn có thể điều chỉnh nhu cầu hoặc ngân sách?"
-                    :"Đây là một số sản phẩm tham khảo trong danh mục. Với nguồn GearVN, hãy kiểm tra giá và tình trạng hàng tại cửa hàng.",found,0,limit,false);
+                    :"Đây là một số sản phẩm tham khảo trong danh mục. Hãy kiểm tra giá và tình trạng hàng trước khi mua.",found,0,limit,false);
         }
         if(!build && commercialQuestion) return new Answer("Bạn cho mình tên hoặc mã sản phẩm cần tra cứu để mình kiểm tra thông tin trong danh mục nhé.",List.of(),0,limit,false);
         if(!build) return new Answer("Bạn có thể hỏi về sản phẩm hoặc cho mình biết mục đích dùng máy và ngân sách để gợi ý cấu hình.",List.of(),0,limit,false);

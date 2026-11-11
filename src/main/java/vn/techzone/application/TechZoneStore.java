@@ -586,12 +586,12 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
                 balances.put(current.id,new InventoryBalance(current.id,0,0,0,1,"GEARVN-EXTERNAL"));
                 openingSellable.put(current.id,0);
             } else {
+                current=updateSourcedIdentity(current,item);
                 current.price=item.price();
                 current.salePrice=item.salePrice();
                 current.active=true;
                 current.updatedAt=item.fetchedAt()==null?LocalDateTime.now():item.fetchedAt();
-                current.specs.clear();
-                current.specs.putAll(item.specs());
+                mergeSourcedFields(current,item.specs());
                 current.specs.put("sourceProvider","GEARVN");
                 current.specs.put("sourceUrl",item.sourceUrl());
                 current.specs.put("sourceImageUrl",item.imageUrl());
@@ -608,6 +608,71 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
         }
         if(updated>0) syncCatalogIndexes();
         return updated;
+    }
+
+    /** Merge source metadata for existing listings without changing stock, activity or local specifications. */
+    public int mergeGearVNDetails(List<GearVNCatalogProduct> listings) {
+        int changed=0;
+        for(GearVNCatalogProduct item:listings) {
+            ProductVariant product=products.get(item.id());
+            if(product==null || !"GEARVN".equals(product.spec("sourceProvider"))) continue;
+            product=updateSourcedIdentity(product,item);
+            for(String key:List.of("sourceDetailStatus","sourceDescription","sourceDetailFetchedAt","listingSummary","sourceSpecStatus","sourceSpecCount","sourceFeatureStatus")) {
+                String value=item.specs().get(key);
+                if(value!=null && !value.isBlank()) product.specs.put(key,value);
+            }
+            mergeSourcedFields(product,item.specs());
+            product.price=item.price();
+            product.salePrice=item.salePrice();
+            product.specs.put("sourceFetchedAt",Objects.toString(item.fetchedAt(),""));
+            product.specs.put("sourceAvailability",item.availability());
+            changed++;
+        }
+        if(changed>0) syncCatalogIndexes();
+        return changed;
+    }
+
+    private static void mergeSourcedFields(ProductVariant product,Map<String,String> incoming) {
+        incoming.forEach((key,value)->{
+            if(!key.startsWith("sourceConflicting.")) return;
+            String field=key.substring("sourceConflicting.".length());
+            String local=product.specs.get(field);
+            String previous=product.specs.get("sourceSpecValue."+field);
+            if(!incoming.containsKey(field) && local!=null && (local.equals(previous) || (previous==null && local.equals(value)))) {
+                product.specs.remove(field);
+                product.specs.remove("sourceSpecValue."+field);
+            }
+        });
+        for(String key:List.of("socket","memoryType")) {
+            if(!incoming.containsKey(key)) {
+                String previous=product.specs.get("sourceSpecValue."+key);
+                if(previous!=null && previous.equals(product.specs.get(key))) product.specs.remove(key);
+                product.specs.remove("sourceSpecValue."+key);
+                product.specs.remove("sourceNormalized."+key);
+            }
+        }
+        if("NO_CONFLICT_DETECTED".equals(incoming.get("sourceQualityStatus"))) product.specs.remove("sourceQualityWarnings");
+        incoming.forEach((key,value)->{
+            if(value==null || value.isBlank()) return;
+            if(key.startsWith("Thông số · ") || key.startsWith("Đặc điểm · ") || key.equals("socket") || key.equals("memoryType")) {
+                String previous=product.specs.get("sourceSpecValue."+key);
+                String local=product.specs.get(key);
+                if(local==null || local.equals(previous)) product.specs.put(key,value);
+                product.specs.put("sourceSpecValue."+key,value);
+            } else if(key.startsWith("source") || key.equals("listingSummary")) product.specs.put(key,value);
+        });
+    }
+
+    private ProductVariant updateSourcedIdentity(ProductVariant product,GearVNCatalogProduct incoming) {
+        if(product.category.equals(incoming.category()) && product.brand.equals(incoming.brand())) return product;
+        ProductVariant corrected=new ProductVariant(product.id,product.productId(),product.productName(),product.sku,
+                product.name,incoming.category(),incoming.brand(),product.description,product.color,product.price,
+                product.salePrice,product.warrantyMonths,product.specs,product.productActiveForStorage(),product.variantActiveForStorage());
+        corrected.createdAt=product.createdAt;
+        corrected.updatedAt=product.updatedAt;
+        corrected.active=product.active;
+        products.put(product.id,corrected);
+        return corrected;
     }
 
     /** One explicitly sourced pair; a prior staff review always takes precedence. */
@@ -1449,6 +1514,8 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
         for (CartItem item : cart.values()) {
             ProductVariant p = product(item.variantId);
             if (p == null || !p.active) return "Có sản phẩm không còn được bán. Vui lòng cập nhật giỏ hàng.";
+            if ("GEARVN".equals(p.spec("sourceProvider")) && available(item.variantId)==0)
+                return p.name + " cần được xác nhận tồn kho trước khi đặt hàng.";
             if (item.quantity <= 0 || item.quantity > available(item.variantId)) {
                 return p.name + " chỉ còn " + available(item.variantId) + " sản phẩm có thể bán.";
             }
@@ -1490,11 +1557,13 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
         if (p == null || !p.active) return "Sản phẩm không khả dụng.";
         if (quantity < 1) return "Số lượng phải lớn hơn 0.";
         int existing = cart.containsKey(variantId) ? cart.get(variantId).quantity : 0;
-        if ((long) existing + quantity > available(variantId)) return "Tồn kho hiện có không đủ cho số lượng này.";
+        boolean reference="GEARVN".equals(p.spec("sourceProvider")) && available(variantId)==0;
+        if (reference && (long)existing + quantity > 99) return "Mỗi sản phẩm chỉ được chọn tối đa 99 chiếc.";
+        if (!reference && (long) existing + quantity > available(variantId)) return "Tồn kho hiện có không đủ cho số lượng này.";
         new vn.techzone.domain.ShoppingCart(cart).addItem(variantId, quantity,p.effectivePrice());
         recordInteraction("cart_add", p.name,p.id);
         audit(signedInName, "Thêm vào giỏ", p.name + " × " + quantity);
-        return "Đã thêm " + p.name + " vào giỏ hàng.";
+        return "Đã thêm " + p.name + " vào giỏ hàng."+(reference?" Cần xác nhận tồn kho trước khi đặt hàng.":"");
     }
 
     public String addRecommendedToCart(String primaryId, String variantId, int quantity) {
@@ -1523,7 +1592,10 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
             dirty = true;
             return "Đã xóa sản phẩm khỏi giỏ.";
         }
-        if (quantity > available(variantId)) return "Tồn kho chỉ còn " + available(variantId) + ".";
+        ProductVariant product=product(variantId);
+        boolean reference=product!=null && product.active && "GEARVN".equals(product.spec("sourceProvider")) && available(variantId)==0;
+        if (reference && quantity>99) return "Mỗi sản phẩm chỉ được chọn tối đa 99 chiếc.";
+        if (!reference && quantity > available(variantId)) return "Tồn kho chỉ còn " + available(variantId) + ".";
         cart.get(variantId).updateQuantity(quantity);
         dirty = true;
         return "Đã cập nhật số lượng.";
@@ -2028,6 +2100,29 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
 
     public synchronized String restock(String variantId, int quantity, String actor) {
         return restock(variantId,quantity,actor,"TZR-"+UUID.randomUUID());
+    }
+
+    /** One-time local demonstration stock; reservations and existing serials are preserved. */
+    public synchronized int seedDemoStock100() {
+        int changed=0;
+        for(ProductVariant product:products.values()) {
+            if(!product.active) continue;
+            InventoryBalance b=balance(product.id);
+            if(b.available>=100) continue;
+            int needed=100-b.available, next=unitsForVariant(product.id).size()+1;
+            for(int i=0;i<needed;i++) {
+                String serial=serialFor(product.id,next++);
+                while(!issuedSerials.add(serial)) serial=serialFor(product.id,next++);
+                unitsBySerial.put(serial,new InventoryUnit(serial,product.id,LocalDateTime.now(),"DEMO-STOCK-100",b.warehouse));
+            }
+            b.available+=needed;
+            changed++;
+        }
+        if(changed>0) {
+            syncCatalogIndexes();
+            audit("Hệ thống", "Khởi tạo tồn kho mô phỏng", "Bổ sung tồn khả dụng lên 100 cho " + changed + " sản phẩm.");
+        }
+        return changed;
     }
 
     private synchronized String restock(String variantId,int quantity,String actor,String batchNumber) {

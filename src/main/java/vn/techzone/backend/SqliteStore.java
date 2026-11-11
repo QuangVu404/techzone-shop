@@ -134,6 +134,19 @@ public final class SqliteStore implements AutoCloseable {
         }
     }
     public synchronized int refreshGearVNCatalog(Path snapshot) throws Exception { return syncGearVNCatalog(snapshot); }
+    public synchronized void importBundledGearVNDetails() throws Exception {
+        if(seedApplied("gearvn-quality-snapshot-v3")) return;
+        try(InputStream input=SqliteStore.class.getResourceAsStream("/vn/techzone/catalog/gearvn-catalog.tsv")) {
+            if(input==null) return;
+            Path temporary=Files.createTempFile(dbPath.getParent(),".gearvn-detail-",".tsv");
+            try {
+                Files.copy(input,temporary,StandardCopyOption.REPLACE_EXISTING);
+                List<TechZoneStore.GearVNCatalogProduct> listings=readGearVNCatalog(temporary);
+                if(listings.stream().noneMatch(item->item.specs().containsKey("sourceSpecStatus"))) return;
+                runSeed("gearvn-quality-snapshot-v3",store->store.mergeGearVNDetails(listings));
+            } finally { Files.deleteIfExists(temporary); }
+        }
+    }
     private boolean seedApplied(String name) throws SQLException {
         try(PreparedStatement p=db.prepareStatement("SELECT 1 FROM seed_migrations WHERE name=?")) {
             p.setString(1,name);try(ResultSet r=p.executeQuery()){return r.next();}
@@ -184,6 +197,7 @@ public final class SqliteStore implements AutoCloseable {
     public synchronized void importVerifiedManufacturerPair() throws Exception { runSeed("verified-pair-am5-v1",s->s.seedVerifiedManufacturerPair()?1:0); }
     public synchronized void importVerifiedRyzen7600Pairs() throws Exception { runSeed("verified-pair-7600-v1",s->s.seedVerifiedRyzen7600Pairs()?1:0); }
     public synchronized void importVerifiedStorageFacts() throws Exception { runSeed("verified-m2-facts-v1",s->s.seedVerifiedStorageFacts()?1:0); }
+    public synchronized void seedDemoStock100() throws Exception { runSeed("demo-stock-100-v1",TechZoneStore::seedDemoStock100); }
     @FunctionalInterface private interface Seed { int apply(TechZoneStore store) throws Exception; }
     private void runSeed(String name,Seed seed) throws Exception {
         try(PreparedStatement q=db.prepareStatement("SELECT 1 FROM seed_migrations WHERE name=?")) {

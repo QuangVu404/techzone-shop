@@ -75,9 +75,7 @@
           const row=document.createElement('div');row.className='advisor-product';
           const score=answer.semanticScores?.[product.id];
           const external=product.specs?.sourceProvider==='GEARVN';
-          const source=product.specs?.sourceUrl||'';
-          const safeSource=/^https:\/\/gearvn\.com\/products\/[a-z0-9-]+$/.test(source)?source:'';
-          row.innerHTML=`<img src="${h(productImageUrl(product))}" alt=""><div><button type="button" class="advisor-product-name" data-advisor-detail="${h(product.id)}">${h(product.name)}</button><span>Giá: ${money(product.effectivePrice)} · ${external?'Nguồn GearVN':`Tồn kho: ${product.available}`}</span>${Number.isFinite(score)?`<span>Điểm gần ngữ nghĩa: ${h(score.toFixed(3))}</span>`:''}${marketOffers.has(product.id)?marketOffer(product):''}</div>${external?(safeSource?`<a href="${h(safeSource)}" target="_blank" rel="noopener noreferrer">Xem tại GearVN</a>`:''):`<button type="button" data-advisor-add="${h(product.id)}" aria-label="Thêm ${h(product.name)} vào giỏ" ${product.available?'':'disabled'}>＋</button>`}`;
+          row.innerHTML=`<img src="${h(productImageUrl(product))}" alt=""><div><button type="button" class="advisor-product-name" data-advisor-detail="${h(product.id)}">${h(product.name)}</button><span>Giá: ${money(product.effectivePrice)} · ${external&&!product.available?'Cần xác nhận tồn kho':`Tồn kho: ${product.available}`}</span>${product.specs?.sourceQualityWarnings?`<span>⚠ ${h(product.specs.sourceQualityWarnings)}</span>`:''}${Number.isFinite(score)?`<span>Điểm gần ngữ nghĩa: ${h(score.toFixed(3))}</span>`:''}</div><button type="button" data-advisor-add="${h(product.id)}" aria-label="Thêm ${h(product.name)} vào giỏ" ${external||product.available?'':'disabled'}>＋</button>`;
           section.append(row);
         }
         if(answer.configuration && answer.total){const total=document.createElement('p');total.className='advisor-total';const estimate=answer.total+Math.floor(answer.total/10)+(answer.total<2000000?35000:0);total.textContent='Tổng cấu hình: '+money(answer.total)+' · Dự kiến cả thuế, giao hàng: '+money(estimate);section.append(total)}

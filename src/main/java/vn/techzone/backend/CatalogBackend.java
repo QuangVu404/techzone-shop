@@ -8,6 +8,7 @@ import vn.techzone.application.RecommendUseCase;
 import vn.techzone.application.CheckoutUseCase;
 import vn.techzone.application.AllocateSerialUseCase;
 import vn.techzone.application.WarrantyUseCase;
+import vn.techzone.application.ProvisionalCompatibilityService;
 import vn.techzone.domain.TechZoneModels.ProductVariant;
 import vn.techzone.domain.TechZoneModels.InventoryBalance;
 import vn.techzone.domain.TechZoneModels.SalesOrder;
@@ -45,6 +46,10 @@ public final class CatalogBackend implements AutoCloseable {
     private final Path imageDirectory;
     private final HttpServer server;
     private final ExecutorService executor;
+    private final ExecutorService imagePrefetch = Executors.newSingleThreadExecutor(r -> {
+        Thread t=new Thread(r,"techzone-image-prefetch"); t.setDaemon(true); return t;
+    });
+    private final java.util.concurrent.atomic.AtomicBoolean imagePrefetchRunning = new java.util.concurrent.atomic.AtomicBoolean();
     private final Object storeLock = new Object();
     private final java.util.concurrent.atomic.AtomicBoolean marketRefresh = new java.util.concurrent.atomic.AtomicBoolean();
     private final String token = UUID.randomUUID().toString() + UUID.randomUUID();
@@ -55,6 +60,7 @@ public final class CatalogBackend implements AutoCloseable {
     private record OperationData(long revision,byte[] state,String message) { }
     private record SemanticSnapshot(int revision,boolean available,List<SemanticSearch.Document> documents) { }
     private record AdvisorData(AdvisorService.Answer answer,List<ProductData> products,boolean semanticUsed) { }
+    private record CandidateSnapshot(int revision,boolean available,String query,List<SemanticSearch.Document> documents) { }
 
     public CatalogBackend(TechZoneStore store, Path imageDirectory) throws IOException {
         this(store, imageDirectory, true);
@@ -93,6 +99,7 @@ public final class CatalogBackend implements AutoCloseable {
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         executor = Executors.newFixedThreadPool(2, r -> { Thread t=new Thread(r,"techzone-catalog-api"); t.setDaemon(true); return t; });
         server.setExecutor(executor); server.createContext("/v1/", this::handle); server.createContext("/", this::web); server.start();
+        if(seedDemoImages) prefetchSourceImages(store.products().stream().map(this::copy).toList());
     }
     public java.net.URI baseUri() { return java.net.URI.create("http://127.0.0.1:" + server.getAddress().getPort()); }
     public String token() { return token; }
@@ -113,23 +120,41 @@ public final class CatalogBackend implements AutoCloseable {
         Path temporary=Files.createTempFile(imageDirectory,".gearvn-image-",".tmp");
         try {
             HttpRequest request=HttpRequest.newBuilder(java.net.URI.create(url)).timeout(Duration.ofSeconds(15))
-                    .header("User-Agent","TechZone-Demo/1.0").header("Accept","image/jpeg,image/png").GET().build();
+                    .header("User-Agent","TechZone-Demo/1.0").header("Accept","image/jpeg,image/png,image/webp,image/avif").GET().build();
             HttpResponse<InputStream> response;
             try { response=SOURCE_IMAGE_CLIENT.send(request,HttpResponse.BodyHandlers.ofInputStream()); }
             catch(InterruptedException ex) { Thread.currentThread().interrupt(); return false; }
             try(InputStream body=response.body()) {
                 String type=response.headers().firstValue("Content-Type").orElse("").toLowerCase(Locale.ROOT);
-                if(response.statusCode()!=200 || !(type.startsWith("image/jpeg") || type.startsWith("image/png"))) return false;
+                if(response.statusCode()!=200 || !(type.startsWith("image/jpeg") || type.startsWith("image/png")
+                        || type.startsWith("image/webp") || type.startsWith("image/avif"))) return false;
                 byte[] bytes=body.readNBytes(MAX_SOURCE_IMAGE+1);
                 if(bytes.length>MAX_SOURCE_IMAGE) return false;
-                BufferedImage decoded=VisualDescriptor.decode(bytes);
+                BufferedImage decoded;
+                try { decoded=type.startsWith("image/jpeg") || type.startsWith("image/png")
+                        ? VisualDescriptor.decode(bytes) : ImageNormalizer.normalize(bytes); }
+                catch(InterruptedException ex) { Thread.currentThread().interrupt(); return false; }
                 if(!ImageIO.write(decoded,"png",temporary.toFile())) return false;
             }
-            try { Files.move(temporary,destination,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING); }
-            catch(AtomicMoveNotSupportedException ex) { Files.move(temporary,destination,StandardCopyOption.REPLACE_EXISTING); }
+            try { Files.move(temporary,destination); }
+            catch(FileAlreadyExistsException ignored) { /* Keep a photo uploaded while this download was in flight. */ }
             index.add(product.id());
             return true;
         } finally { Files.deleteIfExists(temporary); }
+    }
+    private void prefetchSourceImages(List<ProductData> products) {
+        if(!imagePrefetchRunning.compareAndSet(false,true)) return;
+        imagePrefetch.execute(() -> {
+            try {
+                for(ProductData p:products) {
+                    if(Thread.currentThread().isInterrupted()) break;
+                    if(!p.active() || !"GEARVN".equals(p.specs().get("sourceProvider")) || index.contains(p.id())) continue;
+                    if(!p.id().matches("[A-Za-z0-9_-]+")) continue;
+                    try { cacheSourceImage(p,imageDirectory.resolve(p.id()+".png")); }
+                    catch(IOException | RuntimeException ignored) { /* A later request can retry an unavailable image. */ }
+                }
+            } finally { imagePrefetchRunning.set(false); }
+        });
     }
     private void clearGearVNImageCache() throws IOException {
         try(DirectoryStream<Path> paths=Files.newDirectoryStream(imageDirectory,"GVN-*.png")) {
@@ -144,11 +169,20 @@ public final class CatalogBackend implements AutoCloseable {
         StringBuilder text = new StringBuilder(product.name).append(' ').append(product.sku).append(' ')
                 .append(product.category).append(' ').append(product.brand);
         if (!product.id.startsWith("PCP-")) text.append(' ').append(product.description);
+        if(!product.spec("sourceDescription").isBlank() && !product.spec("sourceDescription").equals(product.description))
+            text.append(' ').append(product.spec("sourceDescription"));
         product.specs.forEach((key, value) -> {
-            if (!key.startsWith("Nguồn") && !key.startsWith("Ảnh") && !key.startsWith("Giá")
+            if (!key.startsWith("source") && !key.equals("listingSummary") && !key.startsWith("Nguồn") && !key.startsWith("Ảnh") && !key.startsWith("Giá")
                     && value != null && !value.isBlank()) text.append(' ').append(key).append(' ').append(value);
         });
         return new SemanticSearch.Document(product.id, text.toString());
+    }
+    private static int sameCategoryScore(ProductVariant primary,ProductVariant candidate) {
+        Set<String> words=new HashSet<>();
+        for(String token:TechZoneStore.normalize(primary.name).split("\\s+")) if(token.length()>=3) words.add(token);
+        int score=primary.brand.equalsIgnoreCase(candidate.brand)?3:0;
+        for(String token:TechZoneStore.normalize(candidate.name).split("\\s+")) if(words.contains(token)) score++;
+        return score;
     }
     private static String safeShoppingIntro(String generated,boolean hasProducts) {
         if(generated==null) return "";
@@ -186,7 +220,7 @@ public final class CatalogBackend implements AutoCloseable {
             if(!references.isEmpty()) answer=new AdvisorService.Answer(
                     "Chưa đủ thông số và dữ liệu tương thích để lập cấu hình đã kiểm chứng. "
                     +"Các sản phẩm dưới đây chỉ là kết quả tham khảo theo nhu cầu, không phải một bộ máy hoặc cam kết phù hợp ngân sách; "
-                    +"cần kiểm tra thông số, tương thích, giá và tình trạng hàng tại GearVN.",references,0,budget,false);
+                    +"cần kiểm tra thông số, tương thích, giá và tình trạng hàng trước khi mua.",references,0,budget,false);
         }
         return new AdvisorData(answer,answer.products().stream().map(this::copy).toList(),semanticUsed);
     }
@@ -616,7 +650,11 @@ public final class CatalogBackend implements AutoCloseable {
             if (path.equals("/v1/search/images") && method.equals("POST")) {
                 BufferedImage query=ImageNormalizer.normalize(readImage(e));
                 List<ProductData> products=withStore(() -> store.products().stream().map(this::copy).toList());
+                prefetchSourceImages(products);
                 Set<String> eligible=new HashSet<>(); for(ProductData p:products) if(p.active && (p.available>0 || "GEARVN".equals(p.specs().get("sourceProvider"))) && index.contains(p.id))eligible.add(p.id);
+                long total=products.stream().filter(p -> p.active && (p.available>0 || "GEARVN".equals(p.specs().get("sourceProvider"))) && p.imageAvailable()).count();
+                e.getResponseHeaders().set("X-TechZone-Image-Indexed",Integer.toString(eligible.size()));
+                e.getResponseHeaders().set("X-TechZone-Image-Total",Long.toString(total));
                 if (eligible.isEmpty()) { sendText(e,200,"text/plain; charset=utf-8",""); return; }
                 Path queryFile=Files.createTempFile("techzone-image-query-", ".png");
                 Path eligibleFile=Files.createTempFile("techzone-image-eligible-", ".txt");
@@ -639,11 +677,71 @@ public final class CatalogBackend implements AutoCloseable {
             }
             String prefix="/v1/products/";
             if (path.startsWith(prefix)) {
-                String tail=path.substring(prefix.length()); boolean image=tail.endsWith("/image"), details=tail.endsWith("/details"), recommendations=tail.endsWith("/recommendations");
-                String id=image?tail.substring(0,tail.length()-6):details?tail.substring(0,tail.length()-8):recommendations?tail.substring(0,tail.length()-16):tail;
+                String tail=path.substring(prefix.length()); boolean image=tail.endsWith("/image"), details=tail.endsWith("/details"), recommendations=tail.endsWith("/recommendations"), similar=tail.endsWith("/similar"), candidates=tail.endsWith("/compatibility-candidates");
+                String id=image?tail.substring(0,tail.length()-6):details?tail.substring(0,tail.length()-8):recommendations?tail.substring(0,tail.length()-16):similar?tail.substring(0,tail.length()-8):candidates?tail.substring(0,tail.length()-"/compatibility-candidates".length()):tail;
                 if (!id.matches("[A-Za-z0-9_-]+")) { sendText(e,400,"text/plain; charset=utf-8","Mã sản phẩm không hợp lệ."); return; }
                 ProductData p=withStore(() -> { ProductVariant v=store.product(id); return v==null ? null : copy(v); });
                 if(p==null) { sendText(e,404,"text/plain; charset=utf-8","Không tìm thấy sản phẩm."); return; }
+                if(candidates && method.equals("GET")) {
+                    SemanticSearch engine=semanticSearch;
+                    ProvisionalCompatibilityService service=new ProvisionalCompatibilityService();
+                    CandidateSnapshot snapshot=withStore(() -> {
+                        ProductVariant primary=store.product(id);
+                        var options=service.candidates(primary,store.products(),store.cart().keySet(),store::available,store::assessPair);
+                        String query=primary==null?"":primary.category+" "+primary.name+" linh kiện máy tính lắp ráp";
+                        return new CandidateSnapshot(store.catalogRevision(),store.recommendationServiceAvailable(),query,
+                                options.stream().map(c->semanticDocument(c.product())).toList());
+                    });
+                    Map<String,Double> scores=engine!=null && snapshot.available() && !snapshot.documents().isEmpty()
+                            ? engine.rank(snapshot.query(),snapshot.documents(),1000) : null;
+                    String body=withStore(() -> {
+                        ProductVariant primary=store.product(id);
+                        var options=service.candidates(primary,store.products(),store.cart().keySet(),store::available,store::assessPair);
+                        boolean ranked=scores!=null && snapshot.revision()==store.catalogRevision();
+                        Set<String> allowed=snapshot.documents().stream().map(SemanticSearch.Document::id).collect(java.util.stream.Collectors.toSet());
+                        List<ProvisionalCompatibilityService.Candidate> sorted=options.stream().filter(c->allowed.contains(c.product().id))
+                                .sorted(Comparator.comparingInt((ProvisionalCompatibilityService.Candidate c)->c.status().equals("PARTIAL")?0:1)
+                                        .thenComparing(Comparator.comparingDouble((ProvisionalCompatibilityService.Candidate c)->ranked?scores.getOrDefault(c.product().id,-1.0):0.0).reversed())
+                                        .thenComparing(c->c.product().name)).toList();
+                        int limit=store.recommendationLimit();List<ProvisionalCompatibilityService.Candidate> chosen=new ArrayList<>();Set<String> categories=new HashSet<>();
+                        for(var option:sorted) if(chosen.size()<limit && categories.add(option.product().category)) chosen.add(option);
+                        for(var option:sorted) if(chosen.size()<limit && !chosen.contains(option)) chosen.add(option);
+                        StringJoiner items=new StringJoiner(",","[","]");
+                        for(var option:chosen) items.add("{\"product\":"+json(copy(option.product()))+",\"status\":"+esc(option.status())+",\"reason\":"+esc(option.reason())+"}");
+                        return "{\"ranked\":"+ranked+",\"model\":"+esc(ranked?engine.modelName():"")+",\"items\":"+items+"}";
+                    });
+                    sendText(e,200,"application/json; charset=utf-8",body); return;
+                }
+                if(similar && method.equals("GET")) {
+                    SemanticSearch engine=semanticSearch;
+                    SemanticSnapshot snapshot=withStore(() -> {
+                        ProductVariant primary=store.product(id);
+                        List<SemanticSearch.Document> docs=new ArrayList<>();
+                        if(primary!=null && primary.active) {
+                            docs.add(semanticDocument(primary));
+                            store.products().stream().filter(v->v.active && !v.id.equals(id)
+                                    && v.category.equals(primary.category))
+                                    .map(CatalogBackend::semanticDocument).forEach(docs::add);
+                        }
+                        return new SemanticSnapshot(store.catalogRevision(),store.recommendationServiceAvailable(),docs);
+                    });
+                    String primary=snapshot.documents().stream().filter(d->d.id().equals(id)).map(SemanticSearch.Document::text).findFirst().orElse("");
+                    Map<String,Double> scores=engine!=null && snapshot.available() && snapshot.documents().size()>1
+                            ? engine.rank(primary,snapshot.documents(),1000) : null;
+                    boolean[] ranked={false};
+                    List<ProductData> choices=withStore(() -> {
+                        ProductVariant current=store.product(id);
+                        if(current==null || !current.active) return List.of();
+                        ranked[0]=scores!=null && snapshot.revision()==store.catalogRevision();
+                        return store.products().stream().filter(v->!v.id.equals(id) && v.active && v.category.equals(current.category))
+                                .sorted(Comparator.comparingDouble((ProductVariant v)->ranked[0]
+                                        ? scores.getOrDefault(v.id,-1.0) : sameCategoryScore(current,v)).reversed()
+                                        .thenComparing(v->v.name).thenComparing(v->v.id))
+                                .map(this::copy).toList();
+                    });
+                    StringJoiner items=new StringJoiner(",","[","]"); for(ProductData item:choices) items.add(json(item));
+                    sendText(e,200,"application/json; charset=utf-8","{\"ready\":"+ranked[0]+",\"model\":"+esc(ranked[0]?engine.modelName():"")+",\"total\":"+choices.size()+",\"items\":"+items+"}"); return;
+                }
                 if (recommendations && method.equals("GET")) {
                     SemanticSearch engine=semanticSearch;
                     SemanticSnapshot snapshot=withStore(() -> {
@@ -680,7 +778,7 @@ public final class CatalogBackend implements AutoCloseable {
                     sendText(e,200,"application/json; charset=utf-8",body); return;
                 }
                 if (details && method.equals("GET")) { sendText(e,200,"text/plain; charset=utf-8",details(p)); return; }
-                if (!image && !details && !recommendations && method.equals("GET")) { sendText(e,200,"application/json; charset=utf-8",json(p)); return; }
+                if (!image && !details && !recommendations && !similar && !candidates && method.equals("GET")) { sendText(e,200,"application/json; charset=utf-8",json(p)); return; }
                 Path file=imageDirectory.resolve(id+".png");
                 if(image && method.equals("GET")) {
                     if(!Files.isRegularFile(file) && "GEARVN".equals(p.specs().get("sourceProvider"))) cacheSourceImage(p,file);
@@ -795,5 +893,5 @@ public final class CatalogBackend implements AutoCloseable {
     }
     private static void sendText(HttpExchange e,int status,String type,String text)throws IOException { respond(e,status,type,text.getBytes(StandardCharsets.UTF_8)); }
     private static void respond(HttpExchange e,int status,String type,byte[] bytes)throws IOException { e.getResponseHeaders().set("Content-Type",type); e.getResponseHeaders().set("Cache-Control","no-store"); e.sendResponseHeaders(status,bytes.length); try(OutputStream out=e.getResponseBody()){out.write(bytes);} }
-    @Override public void close() { server.stop(0); executor.shutdownNow(); advisorChat.close(); SemanticSearch s=semanticSearch; if(s!=null) s.close(); }
+    @Override public void close() { server.stop(0); executor.shutdownNow(); imagePrefetch.shutdownNow(); advisorChat.close(); SemanticSearch s=semanticSearch; if(s!=null) s.close(); }
 }

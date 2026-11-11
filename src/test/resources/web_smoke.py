@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(dir=root/'target') as tmp:
  session=Path(tmp)/'data/backend-session.properties'
  def start_backend():
   process=subprocess.Popen(command,cwd=tmp,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-  for _ in range(300):
+  for _ in range(1200):
    if session.exists():return process
    if process.poll() is not None:raise RuntimeError(process.stderr.read().decode('utf8','replace'))
    time.sleep(.1)
@@ -42,7 +42,8 @@ with tempfile.TemporaryDirectory(dir=root/'target') as tmp:
   script_response=call('/app.js')
   assert script_response.headers.get_content_charset()=='utf-8'
   script=script_response.read().decode('utf8')
-  for text in ('Crawl dữ liệu GearVN', 'Kiểm tra vỏ máy, kích thước, cáp và BIOS', 'Chưa xác minh'):
+  assert 'refresh-gearvn' not in script
+  for text in ('Kiểm tra vỏ máy, kích thước, cáp và BIOS', 'Chưa xác minh'):
    assert text in script, ('Vietnamese text lost',text)
   for broken in ('ch?a c? gi?', 'C?p nh?t gi?', 'Ki?m tra v? m?y', 'Gi? ??t h?ng'):
    assert broken not in script, ('Broken encoding',broken)
@@ -67,7 +68,12 @@ with tempfile.TemporaryDirectory(dir=root/'target') as tmp:
    assert probe['restored']==probe['initial']==probe['afterDelayedResponse'] and not probe['query'] and probe['allSelected']=='true',probe
    assert 'Giá tham khảo (demo)' not in probe['cardText'] and 'Chưa có thông tin bảo hành' not in probe['cardText'] and 'chưa có giá được xác minh' not in probe['cardText'],probe
    assert 'Giá tham khảo (demo)' not in probe['detailText'] and 'Chưa có thông tin bảo hành' not in probe['detailText'] and 'chưa có giá được xác minh' not in probe['detailText'],probe
-   assert probe['source'].startswith('https://gearvn.com/products/'),probe
+   assert not probe['addDisabled'] and probe['externalLinks']==0,probe
+   assert 'gearvn' not in (probe['cardText']+probe['detailText']).lower(),probe
+   assert 'Thông số ·' in probe['specText'] or 'Đặc điểm ·' in probe['specText'],probe
+   assert probe['advisorLeft']<40,probe
+   assert probe['candidatesCount']>0 and ('Khớp một phần' in probe['candidatesText'] or 'Chưa đủ thông tin' in probe['candidatesText']),probe
+   assert probe['similarBefore']==8 and probe['similarAfter']>probe['similarBefore'],probe
    result=subprocess.run([str(chrome),'--headless','--disable-gpu','--no-sandbox','--disable-extensions','--user-data-dir='+str(Path(tmp)/'browser-cart-probe'),'--virtual-time-budget=25000','--dump-dom',base+'/?cart-probe=1#cart'],capture_output=True,timeout=60)
    match=re.search(r'data-cart-probe="([^"]*)"',result.stdout.decode('utf8','replace'))
    assert result.returncode==0 and match,('cart recommendation probe did not finish',result.stderr.decode('utf8','replace')[-500:])
@@ -103,15 +109,31 @@ with tempfile.TemporaryDirectory(dir=root/'target') as tmp:
   assert 'chưa gồm' in advice['reply'].lower(),advice
   real=[p for p in catalog if p['id'].startswith('GVN-')]
   assert len(real)==200 and len({p['name'].casefold() for p in real})==200
-  assert all(p['imageAvailable'] and p['specs'].get('sourceUrl','').startswith('https://gearvn.com/products/') and p['available']==0 for p in real)
+  coolers=[p for p in real if 'TRYX Panorama' in p['name']]
+  assert len(coolers)==4 and all(p['category']=='Tản nhiệt' and p['brand']=='TRYX' for p in coolers),coolers
+  board=next(p for p in real if p['category']=='Mainboard' and p['specs'].get('socket')=='AM5' and p['specs'].get('memoryType')=='DDR5')
+  filtered=call('/v1/search?query=&category=Mainboard&socket=AM5&memory=DDR5').read().decode('utf8').splitlines()
+  assert board['id'] in filtered,board
+  conflicted=next(p for p in real if 'MWE GOLD 850W V3' in p['name'])
+  assert conflicted['specs'].get('sourceQualityStatus')=='REVIEW' and conflicted['specs'].get('Thông số · Công suất theo hãng')=='850 W',conflicted
+  assert all(p['imageAvailable'] and p['specs'].get('sourceUrl','').startswith('https://gearvn.com/products/') and p['available']==100 for p in real)
   sourced_recs=json.load(call('/v1/products/'+real[0]['id']+'/recommendations'))
   assert not sourced_recs['items'],sourced_recs
+  similar=json.load(call('/v1/products/'+real[0]['id']+'/similar'))
+  assert isinstance(similar['ready'],bool) and isinstance(similar['items'],list),similar
+  assert all(p['id']!=real[0]['id'] and p['category']==real[0]['category'] for p in similar['items']),similar
   all_ids=call('/v1/search?query=&category=&semantic=true').read().decode('utf8').splitlines()
   assert set(all_ids)=={p['id'] for p in catalog if p['active'] and (p['available']>0 or p['specs'].get('sourceProvider')=='GEARVN')},'blank category must include all discoverable products'
   constrained=call('/v1/search?query=&category=&socket=LGA1700&memory=DDR5').read().decode('utf8').splitlines()
   assert constrained and all(next(p for p in catalog if p['id']==item)['specs'].get('socket')=='LGA1700' for item in constrained)
   assert call('/v1/products/'+catalog[0]['id']+'/image?token='+token).status==200
   def action(d):return json.load(call('/v1/web/action',urllib.parse.urlencode(d).encode()))
+  action({'action':'add','id':real[0]['id'],'quantity':1})
+  action({'action':'quantity','id':real[0]['id'],'quantity':2})
+  reference_cart=json.load(call('/v1/web/state'))
+  assert any(item['id']==real[0]['id'] and item['quantity']==2 for item in reference_cart['cart']),reference_cart
+  assert not reference_cart['cartValidation'],reference_cart
+  action({'action':'quantity','id':real[0]['id'],'quantity':0})
   action({'action':'add','id':'MB-B760-D5','quantity':1})
   action({'action':'add','id':'SSD-990','quantity':1})
   warned=json.load(call('/v1/web/state'))

@@ -22,6 +22,8 @@ final class GearVNCatalogCrawler {
         command.add(script.toString());
         command.add("--output");command.add(output.toAbsolutePath().normalize().toString());
         command.add("--limit");command.add(Integer.toString(limit));
+        command.add("--details");
+        command.add("--delay");command.add("0.5");
         Path log=Files.createTempFile("techzone-gearvn-crawl-",".log");
         Process process=null;
         try {
@@ -29,7 +31,7 @@ final class GearVNCatalogCrawler {
                     .redirectErrorStream(true).redirectOutput(log.toFile());
             builder.environment().put("PYTHONUTF8","1");
             process=builder.start();
-            if(!process.waitFor(240,TimeUnit.SECONDS)) {
+            if(!process.waitFor(600,TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 throw new IOException("Crawl GearVN quá thời gian; catalogue hiện tại được giữ nguyên.");
             }

@@ -11,6 +11,8 @@ java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.tec
 if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.SemanticSearchRegression
 if errorlevel 1 exit /b %errorlevel%
+java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.FullCatalogAiRegression
+if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.CatalogBackendRegression
 if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.BackendSqliteRegression
@@ -23,13 +25,21 @@ java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.tec
 if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.DemoCatalogMigrationRegression
 if errorlevel 1 exit /b %errorlevel%
+java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.GearVNDetailsRegression
+if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.AdvisorRegression
 if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.BuildChecksRegression
 if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.PairCompatibilityRegression
 if errorlevel 1 exit /b %errorlevel%
+java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.ProvisionalCompatibilityRegression
+if errorlevel 1 exit /b %errorlevel%
+java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.SimilarProductsRegression
+if errorlevel 1 exit /b %errorlevel%
 python src\test\resources\gearvn_offer_test.py
+if errorlevel 1 exit /b %errorlevel%
+python src\test\resources\gearvn_catalog_test.py
 if errorlevel 1 exit /b %errorlevel%
 java -Dfile.encoding=UTF-8 -cp "target\classes;target\test-classes;lib\*" vn.techzone.AdvisorChatRegression
 if errorlevel 1 exit /b %errorlevel%

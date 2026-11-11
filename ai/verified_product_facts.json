@@ -1,0 +1,17 @@
+{
+  "https://gearvn.com/products/nguon-may-tinh-cooler-master-mwe-gold-850w-v3-atx3-1-80-plus-gold-full-modular": {
+    "source": "https://sfcc.coolermaster.com/en-us/products/MPX-8503-AFAG-2BUV.html",
+    "model": "MWE Gold 850 V3",
+    "facts": {"Công suất theo hãng": "850 W", "Chứng nhận theo hãng": "80 Plus Gold"}
+  },
+  "https://gearvn.com/products/nguon-may-tinh-asus-rog-thor-1200-p3-1200w-platinum-iii-pcie-gen-5-0": {
+    "source": "https://estore.asus.com/es/90ye00v2-b0na00-rog-thor-1200p3-gaming.html",
+    "model": "ROG-THOR-1200P3-GAMING",
+    "facts": {"Công suất theo hãng": "1200 W"}
+  },
+  "https://gearvn.com/products/tan-nhiet-aio-rog-strix-lc-ii-240-argb-white-edition": {
+    "source": "https://rog.asus.com/uk/cooling/cpu-liquid-coolers/rog-strix-lc/rog-strix-lc-ii-240-argb-white-edition-model/spec/",
+    "model": "ROG STRIX LC II 240 ARGB WHITE EDITION",
+    "facts": {"Kích thước radiator theo hãng": "121 x 272 x 27 mm", "Quạt theo hãng": "2 x 120 mm"}
+  }
+}

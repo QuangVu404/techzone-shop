@@ -26,9 +26,11 @@ public final class BackendMain {
             } else initial=new TechZoneStore();
             database=new SqliteStore(dbPath,initial);
             database.importBundledGearVNCatalog();
+            database.importBundledGearVNDetails();
             database.importVerifiedManufacturerPair();
             database.importVerifiedRyzen7600Pairs();
             database.importVerifiedStorageFacts();
+            database.seedDemoStock100();
             TechZoneStore current=SqliteStore.decode(database.read().bytes()); initial.closeRepository();
             backend=new CatalogBackend(current,data.resolve("product-images")); backend.attachDatabase(database);
             backend.attachSemanticSearch(new SemanticSearch());
