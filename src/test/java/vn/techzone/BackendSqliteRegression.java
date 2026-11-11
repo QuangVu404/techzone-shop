@@ -64,14 +64,14 @@ public final class BackendSqliteRegression {
                     check(catalog.productJson("GPU-4060").contains("\"available\":"+(stock-1)),"API shows persisted stock");
                     check(catalog.inventoryJson().contains("GPU-4060") && catalog.ordersJson().contains(orderId),"inventory and order API read saved state");
                     try(Connection connection=DriverManager.getConnection("jdbc:sqlite:"+path.toAbsolutePath()); Statement q=connection.createStatement()) {
-                        try(ResultSet rows=q.executeQuery("SELECT available FROM inventory WHERE product_id='GPU-4060'")) { check(rows.next() && rows.getInt(1)==stock-1,"SQLite inventory row"); }
-                        try(PreparedStatement stmt=connection.prepareStatement("SELECT COUNT(*) FROM sales_orders WHERE id=?")) {
+                        try(ResultSet rows=q.executeQuery("SELECT available_qty FROM inventory_balances WHERE variant_id='GPU-4060'")) { check(rows.next() && rows.getInt(1)==stock-1,"SQLite inventory row"); }
+                        try(PreparedStatement stmt=connection.prepareStatement("SELECT COUNT(*) FROM sales_orders WHERE order_id=?")) {
                             stmt.setString(1,orderId); try(ResultSet rows=stmt.executeQuery()) { check(rows.next() && rows.getInt(1)==1,"SQLite order row"); }
                         }
-                        try(PreparedStatement stmt=connection.prepareStatement("SELECT COUNT(*) FROM order_lines WHERE order_id=?")) {
+                        try(PreparedStatement stmt=connection.prepareStatement("SELECT COUNT(*) FROM order_items WHERE order_id=?")) {
                             stmt.setString(1,orderId); try(ResultSet rows=stmt.executeQuery()) { check(rows.next() && rows.getInt(1)==1,"SQLite order item row"); }
                         }
-                        try(ResultSet rows=q.executeQuery("SELECT COUNT(*) FROM rma_cases WHERE serial='SN-TZ-PHONES24-0001'")) {
+                        try(ResultSet rows=q.executeQuery("SELECT COUNT(*) FROM rma_cases WHERE warranty_id='SN-TZ-PHONES24-0001'")) {
                             check(rows.next() && rows.getInt(1)==1,"SQLite RMA row linked to warranty");
                         }
                         try(ResultSet rows=q.executeQuery("SELECT COUNT(*) FROM interaction_events WHERE event_type='product_view'")) {
@@ -83,7 +83,7 @@ public final class BackendSqliteRegression {
                         try(ResultSet rows=q.executeQuery("SELECT COUNT(*),COUNT(DISTINCT request_id) FROM recommendation_impressions")) {
                             check(rows.next() && rows.getInt(1)>0 && rows.getInt(2)==1,"ranked recommendation impressions retain one request ID");
                         }
-                        try(ResultSet rows=q.executeQuery("SELECT COUNT(*) FROM unit_allocations WHERE serial='SN-TZ-PHONES24-0001' AND order_id='ORD-0897'")) {
+                        try(ResultSet rows=q.executeQuery("SELECT COUNT(*) FROM unit_allocations a JOIN order_items i ON i.order_item_id=a.order_item_id WHERE a.unit_id='SN-TZ-PHONES24-0001' AND i.order_id='ORD-0897'")) {
                             check(rows.next() && rows.getInt(1)==1,"allocated serial persists against the correct order line");
                         }
                         try(ResultSet rows=q.executeQuery("SELECT COUNT(*) FROM payments WHERE order_id='ORD-1042' AND payment_status='AUTHORIZED'")) {
@@ -97,7 +97,7 @@ public final class BackendSqliteRegression {
                     boolean rejected=false; try { first.save(a); } catch(java.io.IOException ex) { rejected=true; }
                     check(rejected,"invalid inventory must reject the entire SQLite transaction");
                     try(Connection connection=DriverManager.getConnection("jdbc:sqlite:"+path.toAbsolutePath()); Statement q=connection.createStatement();
-                        ResultSet rows=q.executeQuery("SELECT available FROM inventory WHERE product_id='GPU-4060'")) {
+                        ResultSet rows=q.executeQuery("SELECT available_qty FROM inventory_balances WHERE variant_id='GPU-4060'")) {
                         check(rows.next() && rows.getInt(1)==stock-1,"failed write must preserve committed stock");
                     }
                     a.balance("GPU-4060").available=stock-1;
@@ -183,12 +183,11 @@ public final class BackendSqliteRegression {
                 }
                 finally { loaded.closeRepository(); }
                 try(Connection c=DriverManager.getConnection("jdbc:sqlite:"+path.toAbsolutePath()); Statement s=c.createStatement()) {
-                    s.executeUpdate("UPDATE product_variants SET sale_price=1234567 WHERE id='GPU-4060'");
-                    s.executeUpdate("UPDATE product_specs SET spec_value='test-sql' WHERE product_id='GPU-4060' AND spec_key='vram'");
-                    s.executeUpdate("UPDATE sales_orders SET shipping_address='Địa chỉ từ SQLite' WHERE id='ORD-1042'");
-                    s.executeUpdate("UPDATE rma_cases SET problem='Mô tả từ SQLite' WHERE serial='SN-TZ-PHONES24-0001'");
-                    s.executeUpdate("UPDATE customers SET name='Tên từ SQLite' WHERE email='api@example.com'");
-                    s.executeUpdate("UPDATE cart_items SET quantity=2 WHERE product_id='RAM-D5-32'");
+                    s.executeUpdate("UPDATE product_variants SET sale_price=1234567, technical_specs=json_set(technical_specs,'$.vram','test-sql') WHERE variant_id='GPU-4060'");
+                    s.executeUpdate("UPDATE sales_orders SET shipping_address='Địa chỉ từ SQLite' WHERE order_id='ORD-1042'");
+                    s.executeUpdate("UPDATE rma_cases SET problem_description='Mô tả từ SQLite' WHERE warranty_id='SN-TZ-PHONES24-0001'");
+                    s.executeUpdate("UPDATE customers SET full_name='Tên từ SQLite' WHERE email='api@example.com'");
+                    s.executeUpdate("UPDATE cart_items SET quantity=2 WHERE variant_id='RAM-D5-32'");
                     s.executeUpdate("UPDATE payments SET provider_ref='SQL-TOKEN' WHERE order_id='ORD-1042'");
                     s.executeUpdate("UPDATE shipments SET tracking_code='SQL-TRACKING' WHERE order_id='ORD-1038'");
                 }
@@ -206,17 +205,19 @@ public final class BackendSqliteRegression {
                             "account and cart values come from relational rows"); }
                 finally { sqlOrder.closeRepository(); }
                 try(Connection c=DriverManager.getConnection("jdbc:sqlite:"+path.toAbsolutePath()); Statement s=c.createStatement()) {
-                    s.executeUpdate("DELETE FROM unit_allocations WHERE serial='SN-TZ-PHONES24-0001'");
+                    s.executeUpdate("CREATE TABLE test_saved_allocation AS SELECT * FROM unit_allocations WHERE unit_id='SN-TZ-PHONES24-0001'");
+                    s.executeUpdate("DELETE FROM unit_allocations WHERE unit_id='SN-TZ-PHONES24-0001'");
                 }
                 boolean allocationMissing=false;
                 try { reopened.read(); } catch(IOException ex) { allocationMissing=true; }
                 check(allocationMissing,"missing unit allocation must not be silently accepted");
                 try(Connection c=DriverManager.getConnection("jdbc:sqlite:"+path.toAbsolutePath()); Statement s=c.createStatement()) {
-                    s.executeUpdate("INSERT INTO unit_allocations(serial,order_id,product_id) VALUES('SN-TZ-PHONES24-0001','ORD-0897','PHONE-S24')");
+                    s.executeUpdate("INSERT INTO unit_allocations SELECT * FROM test_saved_allocation");
+                    s.executeUpdate("DROP TABLE test_saved_allocation");
                 }
                 try(Connection c=DriverManager.getConnection("jdbc:sqlite:"+path.toAbsolutePath()); Statement s=c.createStatement()) {
-                    s.executeUpdate("DELETE FROM order_lines WHERE order_id='ORD-1042'");
-                    s.executeUpdate("DELETE FROM sales_orders WHERE id='ORD-1042'");
+                    s.executeUpdate("DELETE FROM order_items WHERE order_id='ORD-1042'");
+                    s.executeUpdate("DELETE FROM sales_orders WHERE order_id='ORD-1042'");
                 }
                 boolean missingDetected=false;
                 try { reopened.read(); } catch(IOException ex) { missingDetected=true; }
@@ -315,7 +316,7 @@ public final class BackendSqliteRegression {
                 finally { loaded.closeRepository(); }
             }
             try(var files=Files.list(root)) {
-                Path backup=files.filter(p->p.getFileName().toString().contains(".pre-core-")).findFirst().orElseThrow();
+                Path backup=files.filter(p->p.getFileName().toString().contains(".pre-normalize-")).findFirst().orElseThrow();
                 try(Connection c=DriverManager.getConnection("jdbc:sqlite:"+backup); Statement s=c.createStatement(); ResultSet r=s.executeQuery("SELECT revision FROM app_state WHERE id=1")) {
                     check(r.next() && r.getLong(1)==7,"migration creates a readable pre-upgrade backup");
                 }

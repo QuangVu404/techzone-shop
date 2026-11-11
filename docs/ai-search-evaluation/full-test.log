@@ -1,0 +1,35 @@
+Command: .\test.bat
+Run date: 2026-11-11 (Asia/Ho_Chi_Minh)
+Process exit code: 0
+Note: PowerShell wraps unittest output sent to stderr as NativeCommandError; unittest reports OK.
+
+Build complete: target\classes
+TechZone regression checks passed: 130
+Semantic search (BGE-M3): backend, hard filters, fallback passed; mock Recall@3 4/4, NDCG@3 1.000, max 7363.6 ms
+Catalogue backend: product API, access token, visual search, image persistence and stock filtering passed
+SQLite backend: separate process, migration, HTTP, relational rows, restart and conflict checks passed
+Design schema: product families, variant FKs, normalized schema and restart passed
+Application use cases: search fallback, checkout and serial delegation passed
+Domain operations: cart totals, reservation, allocation and invalid transitions passed
+Real catalogue migration: 200 sourced items, existing stock preserved, restart and repeat passed
+Advisor: budget, context, compatibility, stock, missing data and category advice passed
+Build checks: sourced mismatch, connectors and unknown data passed
+Dynamic compatibility: match, conflict, unknown and newly imported product passed
+.\test.bat : ...
+At line:2 char:1
++ .\test.bat 2>&1 | Tee-Object -FilePath target\report-full-test.log; e ...
++ ~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.097s
+
+OK
+Real Qwen chat model: Vietnamese conversation passed
+Build reply: Có gợi ý phù hợp trong danh mục cho cấu hình chơi game khoảng 35 triệu. Bạn có muốn xem thêm các lựa chọn cụ thể không?
+General reply: RAM DDR4 và DDR5 khác nhau về tốc độ, tần số hoạt động và công nghệ, DDR5 có tốc độ nhanh hơn và hiệu suất tốt hơn nhưng cần motherboard hỗ trợ.
+Live adviser API: real Qwen response and grounded catalogue configuration passed
+{"reply":"Tôi hiểu bạn muốn cấu hình PC chơi game với ngân sách [đã ghi nhận] triệu.\n\nMình xếp hạng các cấu hình có các cặp được duyệt theo độ gần ngữ nghĩa với nhu cầu. Điểm này không đo hiệu năng. Giá và tồn kho lấy từ dữ liệu hiện có; chưa gồm màn hình, hệ điều hành và phí phát sinh.\nĐối chiếu linh kiện:\nĐã duyệt · CPU / Mainboard: Socket: LGA1700 / LGA1700 khớp theo dữ liệu danh mục.\nĐã duyệt · CPU / Tản nhiệt: Socket CPU LGA1700; tản nhiệt hỗ trợ LGA1700, AM5.\nĐã duyệt · Mainboard / RAM: Loại bộ nhớ: DDR4 / DDR4 khớp theo dữ liệu danh mục.\nĐã duyệt · Mainboard / SSD: Khe M.2 PCIe/NVMe hỗ trợ kích thước 2280 theo dữ liệu hãng; cần kiểm tra các khe dùng chung.\nĐã duyệt · GPU / PSU: Nguồn 550 W; GPU yêu cầu tối thiểu 550 W theo danh mục; vẫn cần kiểm tra toàn bộ hệ thống và cáp.\nKiểm tra bổ sung:\nChưa xác minh · Mainboard / vỏ: Thiếu vỏ hoặc chuẩn mainboard và danh sách vỏ hỗ
+Live adviser API: BGE interpreted an indirect Vietnamese build request
+Web smoke passed: 220 products; cart, checkout, allocation, delivery, warranty, RMA, recommendation

@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 WEIGHTS = ROOT / 'models' / 'resnet18-f37072fd.pth'
 SIGLIP = ROOT / 'models' / 'siglip-base'
 REVISION = '7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed'
+SIGLIP2 = ROOT / 'models' / 'siglip2-base'
+REVISION2 = '75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2'
 
 def main():
     if len(sys.argv) not in (3, 4):
@@ -22,14 +24,19 @@ def main():
     query = Path(sys.argv[1])
     directory = Path(sys.argv[2])
     eligible = set(Path(sys.argv[3]).read_text(encoding='utf-8').splitlines()) if len(sys.argv) == 4 else None
+    marker2 = SIGLIP2 / '.techzone-ready'
+    use_siglip2 = marker2.is_file() and marker2.read_text(encoding='ascii').strip() == REVISION2 and (SIGLIP2 / 'model.safetensors').is_file()
     marker = SIGLIP / '.techzone-ready'
-    strong = marker.is_file() and marker.read_text(encoding='ascii').strip() == REVISION and (SIGLIP / 'model.safetensors').is_file()
+    use_siglip = marker.is_file() and marker.read_text(encoding='ascii').strip() == REVISION and (SIGLIP / 'model.safetensors').is_file()
+    strong = use_siglip2 or use_siglip
+    model_path = SIGLIP2 if use_siglip2 else SIGLIP
+    model_label = 'SigLIP 2' if use_siglip2 else 'SigLIP' if use_siglip else 'ResNet-18'
     if not strong and not WEIGHTS.is_file():
         raise FileNotFoundError('Missing image model; run setup-ai.bat')
     torch.set_num_threads(min(4, os.cpu_count() or 1))
     if strong:
-        model = SiglipVisionModel.from_pretrained(SIGLIP, local_files_only=True).eval()
-        processor = SiglipImageProcessor.from_pretrained(SIGLIP, local_files_only=True)
+        model = SiglipVisionModel.from_pretrained(model_path, local_files_only=True).eval()
+        processor = SiglipImageProcessor.from_pretrained(model_path, local_files_only=True)
     else:
         model = resnet18(weights=None)
         model.load_state_dict(torch.load(WEIGHTS, map_location='cpu', weights_only=True))
@@ -43,9 +50,9 @@ def main():
         with torch.inference_mode():
             result = model(**inputs).pooler_output.squeeze(0) if strong else model(inputs).squeeze(0)
             return torch.nn.functional.normalize(result, dim=0).numpy()
-    print('#model\t' + ('SigLIP' if strong else 'ResNet-18'))
+    print('#model\t' + model_label)
     query_vector = embedding(query)
-    model_version = 'siglip-' + REVISION if strong else 'resnet18-f37072fd'
+    model_version = 'siglip2-' + REVISION2 if use_siglip2 else 'siglip-' + REVISION if use_siglip else 'resnet18-f37072fd'
     cache_file = directory / '.techzone-image-embeddings.npz'
     cached = {}
     try:

@@ -1,0 +1,33 @@
+mode	query_id	query	labelled_product	rank	latency_ms	top3
+keyword	q01	Intel Core i5 14600K	CPU-14600K	1	17.906	CPU-14600K,CPU-14700K,CPU-7800X3D
+BGE-M3	q01	Intel Core i5 14600K	CPU-14600K	1	104.421	CPU-14600K,CPU-14700K,CPU-7800X3D
+keyword	q02	bộ xử lý AMD Ryzen 7 7800X3D	CPU-7800X3D	1	0.535	CPU-7800X3D
+BGE-M3	q02	bộ xử lý AMD Ryzen 7 7800X3D	CPU-7800X3D	1	120.230	CPU-7800X3D,CPU-14700K,CPU-14600K
+keyword	q03	bo mạch Gigabyte B760 DDR5	MB-B760-D5	1	1.094	MB-B760-D5,MB-B650,RAM-D5-32
+BGE-M3	q03	bo mạch Gigabyte B760 DDR5	MB-B760-D5	1	116.002	MB-B760-D5,MB-B650,RAM-D5-32
+keyword	q04	mainboard MSI B760 DDR4	MB-B760-D4	1	0.209	MB-B760-D4
+BGE-M3	q04	mainboard MSI B760 DDR4	MB-B760-D4	1	91.286	MB-B760-D4
+keyword	q05	RAM Kingston 32GB DDR5 6000	RAM-D5-32	1	0.189	RAM-D5-32
+BGE-M3	q05	RAM Kingston 32GB DDR5 6000	RAM-D5-32	1	100.913	RAM-D5-32
+keyword	q06	card đồ họa RTX 4060 MSI	GPU-4060	1	0.487	GPU-4060,GPU-4070S
+BGE-M3	q06	card đồ họa RTX 4060 MSI	GPU-4060	1	139.494	GPU-4060,GPU-4070S
+keyword	q07	nguồn Corsair RM750e 750W	PSU-750	1	0.794	PSU-750,PSU-550
+BGE-M3	q07	nguồn Corsair RM750e 750W	PSU-750	1	83.085	PSU-750,PSU-550
+keyword	q08	ổ cứng Samsung 990 EVO Plus 1TB	SSD-990	1	0.285	SSD-990
+BGE-M3	q08	ổ cứng Samsung 990 EVO Plus 1TB	SSD-990	1	67.340	SSD-990
+keyword	q09	màn hình LG UltraGear 27GP850	MON-27	1	0.195	MON-27
+BGE-M3	q09	màn hình LG UltraGear 27GP850	MON-27	1	65.768	MON-27
+keyword	q10	điện thoại Samsung Galaxy S24 256GB	PHONE-S24	1	0.424	PHONE-S24,PHONE-IP16
+BGE-M3	q10	điện thoại Samsung Galaxy S24 256GB	PHONE-S24	1	63.255	PHONE-S24,PHONE-IP16
+keyword	q11	màn hình độ phân giải QHD 27 inch	MON-27	1	0.215	MON-27
+BGE-M3	q11	màn hình độ phân giải QHD 27 inch	MON-27	1	88.082	MON-27
+keyword	q12	nguồn 750 watt hiệu suất gold	PSU-750	1	0.338	PSU-750,PSU-550
+BGE-M3	q12	nguồn 750 watt hiệu suất gold	PSU-750	1	67.700	PSU-750,PSU-550
+keyword	q13	ổ lưu trữ nvme 1tb	SSD-990	1	0.283	SSD-990
+BGE-M3	q13	ổ lưu trữ nvme 1tb	SSD-990	1	72.124	SSD-990
+keyword	q14	chuột chơi game có dây	MOUSE-G502	1	11.655	MOUSE-G502,CPU-14600K,CPU-14700K
+BGE-M3	q14	chuột chơi game có dây	MOUSE-G502	1	71.442	MOUSE-G502,CPU-14600K,CPU-7800X3D
+keyword	q15	tản nhiệt khí cho bộ vi xử lý	COOLER-PA120	1	0.195	COOLER-PA120
+BGE-M3	q15	tản nhiệt khí cho bộ vi xử lý	COOLER-PA120	1	64.691	COOLER-PA120
+keyword	q16	điện thoại Android Samsung 256GB	PHONE-S24	1	0.301	PHONE-S24,PHONE-IP16
+BGE-M3	q16	điện thoại Android Samsung 256GB	PHONE-S24	1	61.904	PHONE-S24,PHONE-IP16

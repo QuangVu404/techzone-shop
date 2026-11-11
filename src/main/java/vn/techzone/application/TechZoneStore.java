@@ -46,6 +46,12 @@ import javax.crypto.spec.PBEKeySpec;
  */
 public final class TechZoneStore implements Serializable, vn.techzone.application.port.CheckoutWorkflowPort {
     private static final long serialVersionUID = 1L;
+    public record GearVNCatalogProduct(String id,String name,String category,String brand,String description,
+                                       long price,long salePrice,String sourceSku,String availability,
+                                       String sourceUrl,String imageUrl,LocalDateTime fetchedAt,
+                                       Map<String,String> specs) {
+        public GearVNCatalogProduct { specs=Map.copyOf(specs); }
+    }
     private static final ThreadLocal<Boolean> PRESERVE_SESSION = ThreadLocal.withInitial(() -> false);
     /** Internal trusted transport can preserve the current session; file startup resets it. */
     public static void preserveDeserializedSession(boolean preserve) {
@@ -389,7 +395,7 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
         for(SalesOrder order:orders.values()) if(!ids.contains(order.customerId)) throw new IOException("Đơn hàng không có khách hàng tương ứng.");
         accounts.clear(); accounts.putAll(nextAccounts); carts.clear(); carts.putAll(nextCarts);
         cart=carts.computeIfAbsent(active.id,k -> new LinkedHashMap<>());
-        signedInName=active.name; signedInEmail=active.email;
+        signedInName=active.name; signedInEmail=active.email; signedInCustomerId=active.id;
         interactionConsent=consentByCustomer.getOrDefault(active.id,false);
     }
 
@@ -543,6 +549,65 @@ public final class TechZoneStore implements Serializable, vn.techzone.applicatio
         }
         if (changes > 0) syncCatalogIndexes();
         return changes;
+    }
+
+    /** Replace the active catalogue with public GearVN listings while retaining history and local stock separately. */
+    public int syncGearVNCatalog(List<GearVNCatalogProduct> listings) throws IOException {
+        if(listings==null || listings.size()<50 || listings.size()>500)
+            throw new IOException("GearVN crawl snapshot is incomplete; the current catalogue was kept.");
+        Set<String> ids=new HashSet<>();
+        int updated=0;
+        for(GearVNCatalogProduct item:listings) {
+            if(item==null || item.id()==null || !item.id().matches("GVN-[a-f0-9]{16}")
+                    || item.name()==null || item.name().isBlank() || item.name().length()>300
+                    || item.category()==null || item.category().isBlank()
+                    || item.price()<=0 || item.price()>1_000_000_000L
+                    || item.salePrice()<0 || (item.salePrice()>0 && item.salePrice()>=item.price())
+                    || item.sourceUrl()==null || !item.sourceUrl().matches("https://gearvn\\.com/products/[a-z0-9-]{2,180}")
+                    || item.imageUrl()==null || !item.imageUrl().matches("https://cdn\\.hstatic\\.net/[^\\s]{1,1000}")
+                    || !Set.of("IN_STOCK","OUT_OF_STOCK","UNKNOWN").contains(item.availability())
+                    || !ids.add(item.id()))
+                throw new IOException("GearVN crawl snapshot failed product validation; the current catalogue was kept.");
+        }
+        for(GearVNCatalogProduct item:listings) {
+            ProductVariant current=products.get(item.id());
+            if(current==null) {
+                Map<String,String> specs=new LinkedHashMap<>(item.specs());
+                specs.put("sourceProvider","GEARVN");
+                specs.put("sourceUrl",item.sourceUrl());
+                specs.put("sourceImageUrl",item.imageUrl());
+                specs.put("sourceFetchedAt",Objects.toString(item.fetchedAt(),""));
+                specs.put("sourceAvailability",item.availability());
+                current=new ProductVariant(item.id(),item.id(),item.name(),"TZ-"+item.id(),item.name(),
+                        item.category(),item.brand(),item.description(),"",item.price(),item.salePrice(),0,specs);
+                current.createdAt=item.fetchedAt()==null?LocalDateTime.now():item.fetchedAt();
+                current.updatedAt=current.createdAt;
+                products.put(current.id,current);
+                balances.put(current.id,new InventoryBalance(current.id,0,0,0,1,"GEARVN-EXTERNAL"));
+                openingSellable.put(current.id,0);
+            } else {
+                current.price=item.price();
+                current.salePrice=item.salePrice();
+                current.active=true;
+                current.updatedAt=item.fetchedAt()==null?LocalDateTime.now():item.fetchedAt();
+                current.specs.clear();
+                current.specs.putAll(item.specs());
+                current.specs.put("sourceProvider","GEARVN");
+                current.specs.put("sourceUrl",item.sourceUrl());
+                current.specs.put("sourceImageUrl",item.imageUrl());
+                current.specs.put("sourceFetchedAt",Objects.toString(item.fetchedAt(),""));
+                current.specs.put("sourceAvailability",item.availability());
+            }
+            updated++;
+        }
+        for(ProductVariant product:products.values()) {
+            if(!ids.contains(product.id) && product.active) {
+                product.active=false;
+                product.updatedAt=LocalDateTime.now();
+            }
+        }
+        if(updated>0) syncCatalogIndexes();
+        return updated;
     }
 
     /** One explicitly sourced pair; a prior staff review always takes precedence. */

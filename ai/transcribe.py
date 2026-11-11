@@ -10,9 +10,13 @@ from transformers import WhisperProcessor, WhisperForConditionalGeneration
 ROOT = Path(__file__).resolve().parent.parent
 STRONG = ROOT / 'models' / 'whisper-small'
 REVISION = '973afd24965f72e36ca33b3055d56a652f456b4d'
+MEDIUM = ROOT / 'models' / 'whisper-medium'
+MEDIUM_REVISION = 'abdf7c39ab9d0397620ccaea8974cc764cd0953e'
 marker = STRONG / '.techzone-ready'
 USE_SMALL = marker.is_file() and marker.read_text(encoding='ascii').strip() == REVISION and (STRONG / 'model.safetensors').is_file()
-MODEL = STRONG if USE_SMALL else ROOT / 'models' / 'whisper-tiny'
+medium_marker = MEDIUM / '.techzone-ready'
+USE_MEDIUM = medium_marker.is_file() and medium_marker.read_text(encoding='ascii').strip() == MEDIUM_REVISION and (MEDIUM / 'model.safetensors').is_file()
+MODEL = MEDIUM if USE_MEDIUM else STRONG if USE_SMALL else ROOT / 'models' / 'whisper-tiny'
 
 def main():
     if len(sys.argv) != 2:

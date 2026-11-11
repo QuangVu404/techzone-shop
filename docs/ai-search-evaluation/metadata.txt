@@ -1,0 +1,8 @@
+timestamp=2026-11-11T19:18:34.093382400+07:00
+java=17.0.10
+os=Windows 11 amd64
+model=BGE-M3
+revision=5617a9f61b028005a4858fdac845db406aefb181
+fixture=src\test\resources\search-evaluation.tsv
+catalogue=TechZoneStore seed (mock)
+measurement=in-process; warm documents; single run per query; no HTTP

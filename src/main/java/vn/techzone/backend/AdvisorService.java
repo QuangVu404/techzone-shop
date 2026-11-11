@@ -48,6 +48,11 @@ public final class AdvisorService {
         return store.products().stream().filter(p -> p.active && p.category.equals(name) && store.available(p.id)>0)
                 .sorted(Comparator.comparingLong(ProductVariant::effectivePrice).thenComparing(p->p.id)).toList();
     }
+    private static List<ProductVariant> referenceCategory(TechZoneStore store, String name) {
+        return store.products().stream().filter(p -> p.category.equals(name)
+                && vn.techzone.application.CatalogSearchService.discoverable(p,store.available(p.id)))
+                .sorted(Comparator.comparingLong(ProductVariant::effectivePrice).thenComparing(p->p.id)).toList();
+    }
     private record Candidate(List<ProductVariant> items,long total,double relevance,int unknown) { }
     private static double candidateScore(Candidate c,Map<String,Double> scores) {
         return scores==null ? -c.total() : c.relevance()/c.items().size()-0.02*c.unknown();
@@ -116,7 +121,7 @@ public final class AdvisorService {
         if(query.matches("(?s).*\\b(tuong thich|hop nhau|co phu hop khong)\\b.*"))
             return new Answer("Bạn hãy mở chi tiết sản phẩm hoặc chọn linh kiện trong giỏ để xem những thông số đã đối chiếu. Các điều kiện thiếu vẫn cần được kỹ thuật kiểm tra.",List.of(),0,limit,false);
         if(query.matches(".*\\b(laptop|notebook|may tinh xach tay)\\b.*")) {
-            List<ProductVariant> laptops=category(store,"Laptop").stream().filter(p -> limit==0 || p.effectivePrice()<=limit).limit(4).toList();
+            List<ProductVariant> laptops=referenceCategory(store,"Laptop").stream().filter(p -> limit==0 || p.effectivePrice()<=limit).limit(4).toList();
             return new Answer(laptops.isEmpty()?"Hiện chưa có laptop còn hàng phù hợp trong danh mục. Bạn muốn mình tư vấn máy tính bàn hay linh kiện riêng?"
                     :"Đây là các laptop đang có trong danh mục. Bạn có thể nói thêm mục đích sử dụng để mình tư vấn.",laptops,0,limit,false);
         }
@@ -141,7 +146,7 @@ public final class AdvisorService {
             Comparator<ProductVariant> order=semanticScores==null ? Comparator.comparingLong(ProductVariant::effectivePrice)
                     : Comparator.comparingDouble((ProductVariant p) -> semanticScores.getOrDefault(p.id,0.0)).reversed()
                         .thenComparingLong(ProductVariant::effectivePrice);
-            List<ProductVariant> found=category(store,category).stream().filter(p -> limit==0 || p.effectivePrice()<=limit)
+            List<ProductVariant> found=referenceCategory(store,category).stream().filter(p -> limit==0 || p.effectivePrice()<=limit)
                     .filter(p -> requestedCapacity==0 || productCapacityGb(p)==requestedCapacity)
                     .filter(p -> memoryType.isEmpty() || p.spec("memoryType").equalsIgnoreCase(memoryType))
                     .filter(p -> socket.isEmpty() || p.spec("socket").equalsIgnoreCase(socket))
@@ -150,7 +155,7 @@ public final class AdvisorService {
                             && (!query.contains("intel") || p.brand.equalsIgnoreCase("Intel")))
                     .sorted(order).limit(4).toList();
             return new Answer(found.isEmpty()?"Mình chưa tìm thấy sản phẩm còn hàng phù hợp với các điều kiện bạn đưa ra. Bạn có thể điều chỉnh nhu cầu hoặc ngân sách?"
-                    :"Đây là một số sản phẩm còn hàng trong danh mục. Bạn có thể nói rõ mẫu máy, mục đích hoặc mức giá để chọn kỹ hơn.",found,0,limit,false);
+                    :"Đây là một số sản phẩm tham khảo trong danh mục. Với nguồn GearVN, hãy kiểm tra giá và tình trạng hàng tại cửa hàng.",found,0,limit,false);
         }
         if(!build && commercialQuestion) return new Answer("Bạn cho mình tên hoặc mã sản phẩm cần tra cứu để mình kiểm tra thông tin trong danh mục nhé.",List.of(),0,limit,false);
         if(!build) return new Answer("Bạn có thể hỏi về sản phẩm hoặc cho mình biết mục đích dùng máy và ngân sách để gợi ý cấu hình.",List.of(),0,limit,false);

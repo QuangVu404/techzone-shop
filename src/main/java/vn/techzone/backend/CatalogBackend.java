@@ -23,14 +23,21 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.*;
 import java.net.InetSocketAddress;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
 /** Local catalogue and web backend backed by the persisted demo store. */
 public final class CatalogBackend implements AutoCloseable {
     private static final int MAX_IMAGE = 30 * 1024 * 1024;
+    private static final int MAX_SOURCE_IMAGE = 8 * 1024 * 1024;
+    private static final HttpClient SOURCE_IMAGE_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(8)).followRedirects(HttpClient.Redirect.NEVER).build();
     private volatile TechZoneStore store;
     private volatile SqliteStore database;
     private volatile SemanticSearch semanticSearch;
@@ -95,7 +102,43 @@ public final class CatalogBackend implements AutoCloseable {
         synchronized (storeLock) { return action.call(); }
     }
     private ProductData copy(ProductVariant p) {
-        return new ProductData(p.id,p.productId(),p.productName(),p.sku,p.name,p.category,p.brand,p.description,p.color,p.price,p.salePrice,p.effectivePrice(),p.warrantyMonths,p.active,store.available(p.id),index.contains(p.id),new LinkedHashMap<>(p.specs));
+        boolean remoteImage=p.spec("sourceProvider").equals("GEARVN")
+                && p.spec("sourceImageUrl").startsWith("https://cdn.hstatic.net/");
+        return new ProductData(p.id,p.productId(),p.productName(),p.sku,p.name,p.category,p.brand,p.description,p.color,p.price,p.salePrice,p.effectivePrice(),p.warrantyMonths,p.active,store.available(p.id),index.contains(p.id)||remoteImage,new LinkedHashMap<>(p.specs));
+    }
+    private boolean cacheSourceImage(ProductData product,Path destination) throws IOException {
+        String url=product.specs().getOrDefault("sourceImageUrl","");
+        if(!"GEARVN".equals(product.specs().get("sourceProvider"))
+                || !url.matches("https://cdn\\.hstatic\\.net/[^\\s]{1,1000}")) return false;
+        Path temporary=Files.createTempFile(imageDirectory,".gearvn-image-",".tmp");
+        try {
+            HttpRequest request=HttpRequest.newBuilder(java.net.URI.create(url)).timeout(Duration.ofSeconds(15))
+                    .header("User-Agent","TechZone-Demo/1.0").header("Accept","image/jpeg,image/png").GET().build();
+            HttpResponse<InputStream> response;
+            try { response=SOURCE_IMAGE_CLIENT.send(request,HttpResponse.BodyHandlers.ofInputStream()); }
+            catch(InterruptedException ex) { Thread.currentThread().interrupt(); return false; }
+            try(InputStream body=response.body()) {
+                String type=response.headers().firstValue("Content-Type").orElse("").toLowerCase(Locale.ROOT);
+                if(response.statusCode()!=200 || !(type.startsWith("image/jpeg") || type.startsWith("image/png"))) return false;
+                byte[] bytes=body.readNBytes(MAX_SOURCE_IMAGE+1);
+                if(bytes.length>MAX_SOURCE_IMAGE) return false;
+                BufferedImage decoded=VisualDescriptor.decode(bytes);
+                if(!ImageIO.write(decoded,"png",temporary.toFile())) return false;
+            }
+            try { Files.move(temporary,destination,StandardCopyOption.ATOMIC_MOVE,StandardCopyOption.REPLACE_EXISTING); }
+            catch(AtomicMoveNotSupportedException ex) { Files.move(temporary,destination,StandardCopyOption.REPLACE_EXISTING); }
+            index.add(product.id());
+            return true;
+        } finally { Files.deleteIfExists(temporary); }
+    }
+    private void clearGearVNImageCache() throws IOException {
+        try(DirectoryStream<Path> paths=Files.newDirectoryStream(imageDirectory,"GVN-*.png")) {
+            for(Path path:paths) {
+                String name=path.getFileName().toString();
+                index.remove(name.substring(0,name.length()-4));
+                Files.deleteIfExists(path);
+            }
+        }
     }
     private static SemanticSearch.Document semanticDocument(ProductVariant product) {
         StringBuilder text = new StringBuilder(product.name).append(' ').append(product.sku).append(' ')
@@ -129,6 +172,22 @@ public final class CatalogBackend implements AutoCloseable {
                 && scores.getOrDefault("__intent_build__",0.0)>=scores.getOrDefault("__intent_product__",0.0)-0.03
                 && AdvisorService.budget(combined)>0)
             answer=AdvisorService.answer(store,message,context+" cấu hình PC ",scores);
+        if(semanticUsed && answer.configuration() && answer.products().isEmpty()
+                && answer.reply().startsWith("Chưa tìm được bộ linh kiện")) {
+            Set<String> categories=new HashSet<>();
+            long budget=answer.budget();
+            List<ProductVariant> references=store.products().stream()
+                    .filter(p -> p.active && "GEARVN".equals(p.spec("sourceProvider")))
+                    .filter(p -> Set.of("CPU","Mainboard","RAM","GPU","SSD","PSU","Tản nhiệt","Case").contains(p.category))
+                    .filter(p -> p.effectivePrice()>0 && p.effectivePrice()<=budget)
+                    .filter(p -> scores.getOrDefault(p.id,-1.0)>=0.25)
+                    .sorted(Comparator.comparingDouble((ProductVariant p)->scores.getOrDefault(p.id,-1.0)).reversed())
+                    .filter(p -> categories.add(p.category)).limit(5).toList();
+            if(!references.isEmpty()) answer=new AdvisorService.Answer(
+                    "Chưa đủ thông số và dữ liệu tương thích để lập cấu hình đã kiểm chứng. "
+                    +"Các sản phẩm dưới đây chỉ là kết quả tham khảo theo nhu cầu, không phải một bộ máy hoặc cam kết phù hợp ngân sách; "
+                    +"cần kiểm tra thông số, tương thích, giá và tình trạng hàng tại GearVN.",references,0,budget,false);
+        }
         return new AdvisorData(answer,answer.products().stream().map(this::copy).toList(),semanticUsed);
     }
     private void handle(HttpExchange e) throws IOException {
@@ -194,6 +253,30 @@ public final class CatalogBackend implements AutoCloseable {
                 try {
                     String result=PythonModels.run("gearvn_offers.py",70,database.databasePath().toString());
                     sendText(e,200,"application/json; charset=utf-8",result); return;
+                } finally { marketRefresh.set(false); }
+            }
+            if(path.equals("/v1/web/catalog/refresh") && method.equals("POST") && database!=null) {
+                if(!marketRefresh.compareAndSet(false,true)) { sendText(e,409,"text/plain; charset=utf-8","Đang crawl dữ liệu GearVN."); return; }
+                try {
+                    Path snapshot=imageDirectory.getParent().resolve("gearvn-catalog.tsv");
+                    GearVNCatalogCrawler.crawl(snapshot,200);
+                    int count;
+                    synchronized(storeLock) {
+                        count=database.refreshGearVNCatalog(snapshot);
+                        SqliteStore.State current=database.read();
+                        TechZoneStore replacement=SqliteStore.decodeSession(current.bytes());
+                        TechZoneStore previous=store;
+                        store=replacement;
+                        previous.closeRepository();
+                        clearGearVNImageCache();
+                    }
+                    sendText(e,200,"application/json; charset=utf-8","{\"updated\":"+count+",\"total\":"+count+",\"errors\":[]}"); return;
+                } catch(InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    sendText(e,503,"text/plain; charset=utf-8","Crawl bị gián đoạn; dữ liệu catalogue cũ vẫn được giữ."); return;
+                } catch(Exception ex) {
+                    String message=Objects.toString(ex.getMessage(),"Không crawl được GearVN.");
+                    sendText(e,503,"text/plain; charset=utf-8",message.substring(0,Math.min(400,message.length()))); return;
                 } finally { marketRefresh.set(false); }
             }
             if(path.equals("/v1/operations") && method.equals("POST") && database!=null) {
@@ -281,7 +364,7 @@ public final class CatalogBackend implements AutoCloseable {
                 SemanticSearch engine=semanticSearch;
                 SemanticSnapshot snapshot=withStore(() -> {
                     List<SemanticSearch.Document> documents=new ArrayList<>(store.products().stream()
-                            .filter(p -> p.active && store.available(p.id)>0).map(CatalogBackend::semanticDocument).toList());
+                            .filter(p -> vn.techzone.application.CatalogSearchService.discoverable(p,store.available(p.id))).map(CatalogBackend::semanticDocument).toList());
                     documents.add(new SemanticSearch.Document("__intent_build__","Tư vấn cấu hình lắp ráp dàn máy tính bàn PC theo nhu cầu làm việc, chơi game, đồ họa và ngân sách."));
                     documents.add(new SemanticSearch.Document("__intent_product__","Tìm mua một sản phẩm hoặc linh kiện điện tử theo yêu cầu của khách hàng."));
                     documents.add(new SemanticSearch.Document("__intent_question__","Giải thích, hướng dẫn và so sánh kiến thức công nghệ máy tính."));
@@ -306,7 +389,7 @@ public final class CatalogBackend implements AutoCloseable {
                 String intro=general?generated:safeShoppingIntro(generated,!answer.products().isEmpty());
                 if(intro!=null && !intro.isBlank()) {
                     reply=general ? intro : intro+"\n\n"+reply;
-                    model="Qwen2.5-1.5B-Instruct"+(data.semanticUsed()?" + "+engine.modelName():"");
+                    model=advisorChat.status()+(data.semanticUsed()?" + "+engine.modelName():"");
                 } else if(data.semanticUsed()) model=engine.modelName()+" + danh mục";
                 StringJoiner items=new StringJoiner(",","[","]");
                 for(ProductData item:data.products()) items.add(json(item));
@@ -390,7 +473,7 @@ public final class CatalogBackend implements AutoCloseable {
                 Path wav=Files.createTempFile("techzone-voice-", ".wav");
                 try {
                     Files.write(wav,audio); String result=PythonModels.run("transcribe.py",180,wav.toString());
-                    e.getResponseHeaders().set("X-TechZone-Speech",modelReady("whisper-small","973afd24965f72e36ca33b3055d56a652f456b4d","model.safetensors")?"Whisper Small":"Whisper Tiny");
+                    e.getResponseHeaders().set("X-TechZone-Speech",modelReady("whisper-medium","abdf7c39ab9d0397620ccaea8974cc764cd0953e","model.safetensors")?"Whisper Medium":modelReady("whisper-small","973afd24965f72e36ca33b3055d56a652f456b4d","model.safetensors")?"Whisper Small":"Whisper Tiny");
                     sendText(e,200,"text/plain; charset=utf-8",result.replaceFirst("^vi\\t",""));
                 }
                 finally { Files.deleteIfExists(wav); } return;
@@ -532,9 +615,8 @@ public final class CatalogBackend implements AutoCloseable {
             }
             if (path.equals("/v1/search/images") && method.equals("POST")) {
                 BufferedImage query=ImageNormalizer.normalize(readImage(e));
-                if(index.isEmpty()) { sendText(e,200,"text/plain; charset=utf-8",""); return; }
                 List<ProductData> products=withStore(() -> store.products().stream().map(this::copy).toList());
-                Set<String> eligible=new HashSet<>(); for(ProductData p:products) if(p.active && p.available>0 && index.contains(p.id))eligible.add(p.id);
+                Set<String> eligible=new HashSet<>(); for(ProductData p:products) if(p.active && (p.available>0 || "GEARVN".equals(p.specs().get("sourceProvider"))) && index.contains(p.id))eligible.add(p.id);
                 if (eligible.isEmpty()) { sendText(e,200,"text/plain; charset=utf-8",""); return; }
                 Path queryFile=Files.createTempFile("techzone-image-query-", ".png");
                 Path eligibleFile=Files.createTempFile("techzone-image-eligible-", ".txt");
@@ -546,7 +628,7 @@ public final class CatalogBackend implements AutoCloseable {
                     catch(IOException ex) { sendText(e,503,"text/plain; charset=utf-8",ex.getMessage()); return; }
                 } finally { Files.deleteIfExists(queryFile); Files.deleteIfExists(eligibleFile); }
                 StringBuilder out=new StringBuilder();
-                String visionModel=encoded.startsWith("#model\tSigLIP") ? "SigLIP" : "ResNet-18";
+                String visionModel=encoded.startsWith("#model\tSigLIP 2") ? "SigLIP 2" : encoded.startsWith("#model\tSigLIP") ? "SigLIP" : "ResNet-18";
                 e.getResponseHeaders().set("X-TechZone-Vision",visionModel);
                 for(String line:encoded.split("\\R")) {
                     String[] fields=line.split("\\t",2); if(fields.length!=2 || !eligible.contains(fields[0]))continue;
@@ -601,7 +683,14 @@ public final class CatalogBackend implements AutoCloseable {
                 if (!image && !details && !recommendations && method.equals("GET")) { sendText(e,200,"application/json; charset=utf-8",json(p)); return; }
                 Path file=imageDirectory.resolve(id+".png");
                 if(image && method.equals("GET")) {
-                    if(!Files.isRegularFile(file)) { sendText(e,404,"text/plain; charset=utf-8","Chưa có ảnh."); return; }
+                    if(!Files.isRegularFile(file) && "GEARVN".equals(p.specs().get("sourceProvider"))) cacheSourceImage(p,file);
+                    if(!Files.isRegularFile(file)) {
+                        String source=p.specs().getOrDefault("sourceImageUrl","");
+                        if("GEARVN".equals(p.specs().get("sourceProvider")) && source.matches("https://cdn\\.hstatic\\.net/[^\\s]{1,1000}")) {
+                            e.getResponseHeaders().set("Location",source);e.sendResponseHeaders(302,-1);return;
+                        }
+                        sendText(e,404,"text/plain; charset=utf-8","Image not found."); return;
+                    }
                     respond(e,200,"image/png",Files.readAllBytes(file)); return;
                 }
                 if(image && method.equals("PUT")) {
@@ -632,7 +721,7 @@ public final class CatalogBackend implements AutoCloseable {
                 String content=new String(in.readAllBytes(),StandardCharsets.UTF_8);
                 if(resource.equals("index.html")) content=content.replace("__TOKEN__",token);
                 e.getResponseHeaders().set("X-Content-Type-Options","nosniff");
-                e.getResponseHeaders().set("Content-Security-Policy","default-src 'self'; img-src 'self' blob:; script-src 'self'; style-src 'self'; connect-src 'self'");
+                e.getResponseHeaders().set("Content-Security-Policy","default-src 'self'; img-src 'self' https://cdn.hstatic.net blob:; script-src 'self'; style-src 'self'; connect-src 'self'");
                 sendText(e,200,resource.endsWith(".html")?"text/html; charset=utf-8":resource.endsWith(".js")?"text/javascript; charset=utf-8":"text/css; charset=utf-8",content);
             }
         } finally { e.close(); }
@@ -679,9 +768,9 @@ public final class CatalogBackend implements AutoCloseable {
         StringJoiner rmas=new StringJoiner(",","[","]"); for(var r:store.rmas()) rmas.add("{\"id\":"+esc(r.id)+",\"customerId\":"+esc(r.customerId)+",\"serial\":"+esc(r.serial)+",\"problem\":"+esc(r.problem)+",\"status\":"+esc(r.status)+"}");
         StringJoiner requests=new StringJoiner(",","[","]"); for(var r:store.restockRequests()) requests.add("{\"id\":"+esc(r.id)+",\"product\":"+esc(r.variantId)+",\"quantity\":"+r.quantity+",\"status\":"+esc(r.status)+"}");
         String searchModel=semanticSearch!=null?semanticSearch.status():"Dịch vụ tìm kiếm AI chưa được bật";
-        String speechModel=modelReady("whisper-small","973afd24965f72e36ca33b3055d56a652f456b4d","model.safetensors")?"Whisper Small":
+        String speechModel=modelReady("whisper-medium","abdf7c39ab9d0397620ccaea8974cc764cd0953e","model.safetensors")?"Whisper Medium":modelReady("whisper-small","973afd24965f72e36ca33b3055d56a652f456b4d","model.safetensors")?"Whisper Small":
                 Files.isRegularFile(Path.of("models","whisper-tiny","model.safetensors"))?"Whisper Tiny (dự phòng)":"Chưa cài";
-        String visionModel=modelReady("siglip-base","7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed","model.safetensors")?"SigLIP":
+        String visionModel=modelReady("siglip2-base","75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2","model.safetensors")?"SigLIP 2":modelReady("siglip-base","7fd15f0689c79d79e38b1c2e2e2370a7bf2761ed","model.safetensors")?"SigLIP":
                 Files.isRegularFile(Path.of("models","resnet18-f37072fd.pth"))?"ResNet-18 (dự phòng)":"Chưa cài";
         return "{\"searchModel\":"+esc(searchModel)+",\"speechModel\":"+esc(speechModel)+",\"visionModel\":"+esc(visionModel)+",\"customerId\":"+esc(store.signedInCustomerId())+",\"name\":"+esc(store.signedInName())+",\"address\":"+esc(store.signedInAddress())+",\"cart\":"+cart+",\"promotionPercent\":"+store.promotionPercent()+",\"subtotal\":"+store.cartSubtotal()+",\"cartValidation\":"+esc(store.validateCart())+",\"cartCompatibilityWarning\":"+esc(store.cartCompatibilityWarning())+",\"orders\":"+orders+",\"warranties\":"+warranties+",\"rmas\":"+rmas+",\"requests\":"+requests+",\"categories\":"+categories+",\"reviews\":"+reviews+",\"verification\":"+verification+",\"compatibility\":"+compat+",\"supplierReturns\":"+returns+",\"audit\":"+audit+",\"events\":"+events+",\"notifications\":"+notifications+",\"roles\":"+roles+",\"consent\":"+store.interactionConsent()+",\"recommendationLimit\":"+store.recommendationLimit()+",\"queries\":"+metrics.queries()+",\"recommendationImpressions\":"+metrics.recommendationImpressions()+",\"revenue\":"+store.revenueThisMonth()+",\"available\":"+store.totalAvailable()+"}";
     }

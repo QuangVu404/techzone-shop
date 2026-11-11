@@ -26,9 +26,11 @@ class Offers(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path=str(Path(directory)/'test.sqlite')
             with closing(sqlite3.connect(path)) as db:
-                db.executescript('CREATE TABLE products(id TEXT PRIMARY KEY,name TEXT,active INTEGER); CREATE TABLE inventory(product_id TEXT,available INTEGER); CREATE TABLE market_offers(product_id TEXT PRIMARY KEY,source_sku TEXT,source_url TEXT,price INTEGER,availability TEXT,fetched_at TEXT);')
-                for product,slug,sku,name in gearvn.MATCHES: db.execute('INSERT INTO products VALUES(?,?,1)',(product,name))
-                db.execute('INSERT INTO inventory VALUES(?,?)',('PCP-yXmmP6',17))
+                db.executescript('CREATE TABLE products(product_id TEXT PRIMARY KEY,is_active INTEGER); CREATE TABLE product_variants(variant_id TEXT PRIMARY KEY,product_id TEXT,variant_name TEXT,is_active INTEGER); CREATE TABLE inventory_balances(variant_id TEXT,available_qty INTEGER); CREATE TABLE market_offers(variant_id TEXT PRIMARY KEY,source_sku TEXT,source_url TEXT,price INTEGER,availability TEXT,fetched_at TEXT);')
+                for product,slug,sku,name in gearvn.MATCHES:
+                    db.execute('INSERT INTO products VALUES(?,1)',(product,))
+                    db.execute('INSERT INTO product_variants VALUES(?,?,?,1)',(product,product,name))
+                db.execute('INSERT INTO inventory_balances VALUES(?,?)',('PCP-yXmmP6',17))
                 db.execute('INSERT INTO market_offers VALUES(?,?,?,?,?,?)',('PCP-66C48d','old','old',123,'UNKNOWN','2020')); db.commit()
             def fetch(url):
                 if url.endswith('/robots.txt'): return 'User-agent: *\nAllow: /\n'
@@ -38,15 +40,15 @@ class Offers(unittest.TestCase):
                 result=gearvn.sync(path)
             self.assertEqual(result['updated'],1); self.assertEqual(len(result['errors']),3)
             with closing(sqlite3.connect(path)) as db:
-                self.assertEqual(db.execute('SELECT available FROM inventory').fetchone()[0],17)
-                self.assertEqual(db.execute("SELECT price FROM market_offers WHERE product_id='PCP-66C48d'").fetchone()[0],123)
+                self.assertEqual(db.execute('SELECT available_qty FROM inventory_balances').fetchone()[0],17)
+                self.assertEqual(db.execute("SELECT price FROM market_offers WHERE variant_id='PCP-66C48d'").fetchone()[0],123)
 
     def test_normalized_variant_is_matched_without_using_family_id(self):
         with tempfile.TemporaryDirectory() as directory:
             path=str(Path(directory)/'test.sqlite')
             with closing(sqlite3.connect(path)) as db:
-                db.executescript('CREATE TABLE products(id TEXT PRIMARY KEY,name TEXT,active INTEGER); CREATE TABLE product_variants(id TEXT PRIMARY KEY,product_id TEXT,variant_name TEXT,active INTEGER); CREATE TABLE market_offers(product_id TEXT PRIMARY KEY,source_sku TEXT,source_url TEXT,price INTEGER,availability TEXT,fetched_at TEXT);')
-                db.execute('INSERT INTO products VALUES(?,?,1)',('FAMILY-7600','Ryzen family'))
+                db.executescript('CREATE TABLE products(product_id TEXT PRIMARY KEY,is_active INTEGER); CREATE TABLE product_variants(variant_id TEXT PRIMARY KEY,product_id TEXT,variant_name TEXT,is_active INTEGER); CREATE TABLE market_offers(variant_id TEXT PRIMARY KEY,source_sku TEXT,source_url TEXT,price INTEGER,availability TEXT,fetched_at TEXT);')
+                db.execute('INSERT INTO products VALUES(?,1)',('FAMILY-7600',))
                 db.execute('INSERT INTO product_variants VALUES(?,?,?,1)',('PCP-yXmmP6','FAMILY-7600','AMD Ryzen 5 7600'));db.commit()
             def fetch(url):
                 if url.endswith('/robots.txt'): return 'User-agent: *\nAllow: /\n'
@@ -55,6 +57,6 @@ class Offers(unittest.TestCase):
                 result=gearvn.sync(path)
             self.assertEqual(result['updated'],1)
             with closing(sqlite3.connect(path)) as db:
-                self.assertEqual(db.execute('SELECT product_id FROM market_offers').fetchone()[0],'PCP-yXmmP6')
+                self.assertEqual(db.execute('SELECT variant_id FROM market_offers').fetchone()[0],'PCP-yXmmP6')
 
 if __name__=='__main__': unittest.main()

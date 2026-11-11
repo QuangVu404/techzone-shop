@@ -10,7 +10,7 @@ public final class AdvisorRegression {
     private static ProductVariant item(AdvisorService.Answer a,String category) {
         return a.products().stream().filter(p -> p.category.equals(category)).findFirst().orElseThrow();
     }
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         TechZoneStore store=new TechZoneStore();
         try {
             check(AdvisorService.budget("30 triệu")==30_000_000L && AdvisorService.budget("dưới 25tr")==25_000_000L
@@ -62,6 +62,20 @@ public final class AdvisorRegression {
             check(AdvisorService.answer(store,"PC gaming 50 triệu","",null).products().isEmpty(),"missing stock must not produce an unsupported build");
             check(AdvisorService.answer(store,"Samsung 990 EVO Plus 1TB NVMe","",null).products().size()==1,
                     "an exact product can still be looked up when it is out of stock");
+            List<TechZoneStore.GearVNCatalogProduct> listings=new ArrayList<>();
+            for(int i=0;i<50;i++) listings.add(new TechZoneStore.GearVNCatalogProduct(
+                    String.format("GVN-%016x",i),"GearVN Test CPU "+i,"CPU","Intel","test",
+                    1_000_000,0,"SKU-"+i,"UNKNOWN","https://gearvn.com/products/test-"+i,
+                    "https://cdn.hstatic.net/test.png",null,Map.of()));
+            store.syncGearVNCatalog(listings);
+            var external=store.product("GVN-0000000000000000");
+            check(store.available(external.id)==0 && store.search("Test CPU 0","CPU","","",0,false).stream().anyMatch(p->p.id.equals(external.id)),
+                    "external products are searchable without changing local stock");
+            var externalAdvice=AdvisorService.answer(store,"Tìm CPU dưới 5 triệu","",null);
+            check(!externalAdvice.products().isEmpty() && externalAdvice.products().stream().allMatch(p->p.spec("sourceProvider").equals("GEARVN")),
+                    "category advice can display external references");
+            check(AdvisorService.answer(store,"PC chơi game 50 triệu","",null).products().isEmpty(),
+                    "external references must not become a verified build");
             System.out.println("Advisor: budget, context, compatibility, stock, missing data and category advice passed");
         } finally { store.closeRepository(); }
     }

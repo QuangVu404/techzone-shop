@@ -12,7 +12,7 @@
     if(panel.hidden||document.hidden||statusPending)return;
     statusPending=true;
     try{const data=await api('/v1/web/advisor-status').then(r=>r.json());
-      if(!panel.hidden)status.textContent=data.model==='Qwen2.5-1.5B-Instruct'?'Trợ lý AI cục bộ sẵn sàng':data.model;
+      if(!panel.hidden)status.textContent=data.model.startsWith('Qwen')?'Trợ lý AI cục bộ sẵn sàng · '+data.model:data.model;
     }catch(error){if(!panel.hidden)status.textContent='Tư vấn dựa trên danh mục hiện có'}finally{statusPending=false}
   }
   function show(){
@@ -54,7 +54,7 @@
       if(current!==generation)return;
       thinking.remove();bubble(answer.reply,'assistant');
       const mode=document.createElement('div');mode.className='advisor-mode';
-      mode.textContent=answer.model.startsWith('Qwen2.5-1.5B-Instruct')?'Câu trả lời có dùng mô hình hội thoại Qwen':'Câu trả lời theo danh mục và quy tắc';
+      mode.textContent=answer.model.startsWith('Qwen')?'Câu trả lời có dùng mô hình hội thoại '+answer.model:'Câu trả lời theo danh mục và quy tắc';
       messages.append(mode);
       if(answer.rankingMethod==='semantic'||answer.rankingMethod==='price'){
         const explanation=document.createElement('details');explanation.className='advisor-products';
@@ -74,7 +74,10 @@
         for(const product of answer.products){
           const row=document.createElement('div');row.className='advisor-product';
           const score=answer.semanticScores?.[product.id];
-          row.innerHTML=`<img src="/v1/products/${encodeURIComponent(product.id)}/image?token=${encodeURIComponent(token)}" alt=""><div><button type="button" class="advisor-product-name" data-advisor-detail="${h(product.id)}">${h(product.name)}</button><span>Giá: ${money(product.effectivePrice)} · Tồn kho: ${product.available}</span>${Number.isFinite(score)?`<span>Điểm gần ngữ nghĩa: ${h(score.toFixed(3))}</span>`:''}${marketOffers.has(product.id)?marketOffer(product):''}</div><button type="button" data-advisor-add="${h(product.id)}" aria-label="Thêm ${h(product.name)} vào giỏ" ${product.available?'':'disabled'}>＋</button>`;
+          const external=product.specs?.sourceProvider==='GEARVN';
+          const source=product.specs?.sourceUrl||'';
+          const safeSource=/^https:\/\/gearvn\.com\/products\/[a-z0-9-]+$/.test(source)?source:'';
+          row.innerHTML=`<img src="${h(productImageUrl(product))}" alt=""><div><button type="button" class="advisor-product-name" data-advisor-detail="${h(product.id)}">${h(product.name)}</button><span>Giá: ${money(product.effectivePrice)} · ${external?'Nguồn GearVN':`Tồn kho: ${product.available}`}</span>${Number.isFinite(score)?`<span>Điểm gần ngữ nghĩa: ${h(score.toFixed(3))}</span>`:''}${marketOffers.has(product.id)?marketOffer(product):''}</div>${external?(safeSource?`<a href="${h(safeSource)}" target="_blank" rel="noopener noreferrer">Xem tại GearVN</a>`:''):`<button type="button" data-advisor-add="${h(product.id)}" aria-label="Thêm ${h(product.name)} vào giỏ" ${product.available?'':'disabled'}>＋</button>`}`;
           section.append(row);
         }
         if(answer.configuration && answer.total){const total=document.createElement('p');total.className='advisor-total';const estimate=answer.total+Math.floor(answer.total/10)+(answer.total<2000000?35000:0);total.textContent='Tổng cấu hình: '+money(answer.total)+' · Dự kiến cả thuế, giao hàng: '+money(estimate);section.append(total)}

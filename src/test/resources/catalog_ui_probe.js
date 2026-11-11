@@ -1,4 +1,5 @@
 /* Loaded only by the isolated browser regression test. */
+const encodeProbe = value => btoa(unescape(encodeURIComponent(JSON.stringify(value))));
 if (location.search === '?catalog-probe=1') {
   const originalFetch = window.fetch;
   let delaySearch = false;
@@ -25,18 +26,18 @@ if (location.search === '?catalog-probe=1') {
       document.querySelector('[data-category=""]').click();
       await sleep(3000);
       const afterDelayedResponse = document.querySelectorAll('.product-grid .product').length;
-      const card = document.querySelector('[data-detail="PCP-Zxw7YJ"]').closest('.product');
+      const card = document.querySelector('.product-grid [data-detail^="GVN-"]').closest('.product');
       const cardText = card.textContent;
       card.querySelector('[data-detail]').click();
       for (let i = 0; i < 30 && !document.querySelector('#dialog[open] .detail-info'); i++) await sleep(200);
       const detail = document.querySelector('#dialog[open] .detail-info');
-      const source = detail?.querySelector('a[href^="https://fr.pcpartpicker.com/product/"]');
-      document.body.dataset.catalogProbe = JSON.stringify({initial, filtered, restored,
+      const source = detail?.querySelector('a[href^="https://gearvn.com/products/"]');
+      document.body.dataset.catalogProbe = encodeProbe({initial, filtered, restored,
         afterDelayedResponse, cardText, detailText: detail?.textContent || '', source: source?.href || '',
         query: document.querySelector('#search input[name=query]').value,
         allSelected: document.querySelector('[data-category=""]').getAttribute('aria-pressed')});
     } catch (error) {
-      document.body.dataset.catalogProbe = JSON.stringify({error:String(error)});
+      document.body.dataset.catalogProbe = encodeProbe({error:String(error)});
     }
   }, 1000);
 }
@@ -64,8 +65,8 @@ if (location.search === '?cart-probe=1') {
       const secondChoice=document.querySelector('#cart-recommendation-primary');
       secondChoice.value='CPU-14600K'; secondChoice.dispatchEvent(new Event('change',{bubbles:true}));
       await waitFor(() => document.querySelector('#cart-recommendations .cart-recommendation-results')?.textContent.includes('tạm thời'));
-      document.body.dataset.cartProbe=JSON.stringify({first,second,checkoutEnabled:!document.querySelector('.checkout-button').disabled});
-    } catch(error) { document.body.dataset.cartProbe=JSON.stringify({error:String(error)}); }
+      document.body.dataset.cartProbe=encodeProbe({first,second,checkoutEnabled:!document.querySelector('.checkout-button').disabled});
+    } catch(error) { document.body.dataset.cartProbe=encodeProbe({error:String(error)}); }
   },1000);
 }
 
@@ -85,9 +86,9 @@ if (location.search === '?advisor-probe=1') {
       const total=document.querySelector('.advisor-total')?.textContent||'';
       document.querySelector('.advisor-product [data-advisor-add]').click();
       await waitFor(()=>document.querySelector('.header-cart-count').textContent==='1');
-      document.body.dataset.advisorProbe=JSON.stringify({clarification,products,total,added:true,
+      document.body.dataset.advisorProbe=encodeProbe({clarification,products,total,added:true,
         overflow:document.documentElement.scrollWidth>document.documentElement.clientWidth});
-    }catch(error){document.body.dataset.advisorProbe=JSON.stringify({error:String(error)})}
+    }catch(error){document.body.dataset.advisorProbe=encodeProbe({error:String(error)})}
   },1000);
 }
 
@@ -102,8 +103,8 @@ if (location.search === '?comparison-probe=1') {
       document.querySelector('#compare').click();
       await waitFor(()=>document.querySelector('#dialog').open && document.querySelector('#dialog-content').textContent.includes('Đối chiếu tương thích'));
       const content=document.querySelector('#dialog-content').textContent;
-      document.body.dataset.comparisonProbe=JSON.stringify({hasPair:content.includes('Cặp đã duyệt'),hasM2:content.includes('2280')});
-    }catch(error){document.body.dataset.comparisonProbe=JSON.stringify({error:String(error)})}
+      document.body.dataset.comparisonProbe=encodeProbe({hasPair:content.includes('Cặp đã duyệt'),hasM2:content.includes('2280')});
+    }catch(error){document.body.dataset.comparisonProbe=encodeProbe({error:String(error)})}
   },1000);
 }
 
@@ -127,7 +128,7 @@ if (location.search === '?rec-warm-probe=1') {
       await waitFor(()=>document.querySelector('#dialog[open] [name=text]'));
       const input=document.querySelector('#dialog [name=text]');input.value='Giữ nội dung';
       await waitFor(()=>document.querySelector('#dialog [data-ai-recommendation] .search-badge')?.textContent.includes('AI'));
-      document.body.dataset.recWarmProbe=JSON.stringify({calls,value:input.value,open:document.querySelector('#dialog').open});
-    }catch(error){document.body.dataset.recWarmProbe=JSON.stringify({error:String(error),calls})}
+      document.body.dataset.recWarmProbe=encodeProbe({calls,value:input.value,open:document.querySelector('#dialog').open});
+    }catch(error){document.body.dataset.recWarmProbe=encodeProbe({error:String(error),calls})}
   },1000);
 }

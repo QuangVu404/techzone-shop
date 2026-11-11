@@ -1,0 +1,3 @@
+mode	queries	catalogue_active	recall_at_3	ndcg_at_3	median_ms	p95_ms
+keyword	16	20	1.0000	1.0000	0.301	17.906
+BGE-M3	16	20	1.0000	1.0000	72.124	139.494

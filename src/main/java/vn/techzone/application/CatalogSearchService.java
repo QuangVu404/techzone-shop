@@ -10,6 +10,11 @@ import java.util.regex.Pattern;
 public final class CatalogSearchService {
     @FunctionalInterface public interface SemanticRanker { Map<String,Double> rank(String query,List<ProductVariant> candidates); }
 
+    /** External listings can be discovered without pretending they are internal stock. */
+    public static boolean discoverable(ProductVariant product, int available) {
+        return product.active && (available > 0 || "GEARVN".equals(product.spec("sourceProvider")));
+    }
+
     public List<ProductVariant> search(Collection<ProductVariant> catalogue,ToIntFunction<String> available,
                                        String query,String category,String socket,String memory,long maxPrice,
                                        boolean semanticRanking,Map<String,String> filters,
@@ -41,7 +46,7 @@ public final class CatalogSearchService {
         }
         final String fSocket=Objects.toString(socket,""),fMemory=Objects.toString(memory,"");
         final boolean fRequireSocket=requireSocket,fRequireMemory=requireMemory;final String fCategory=requested;final long fPrice=resolved;
-        List<ProductVariant> eligible=catalogue.stream().filter(p->p.active&&available.applyAsInt(p.id)>0)
+        List<ProductVariant> eligible=catalogue.stream().filter(p->discoverable(p,available.applyAsInt(p.id)))
                 .filter(p->"Tất cả".equals(fCategory)||p.category.equalsIgnoreCase(fCategory))
                 .filter(p->!fRequireSocket||p.spec("socket").equalsIgnoreCase(fSocket))
                 .filter(p->!fRequireMemory||p.spec("memoryType").equalsIgnoreCase(fMemory))

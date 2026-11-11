@@ -128,6 +128,9 @@ final class LegacySqliteStore implements AutoCloseable {
             addColumn("products","color","TEXT NOT NULL DEFAULT ''");
             addColumn("products","warranty_months","INTEGER NOT NULL DEFAULT 0");
             addColumn("inventory","warehouse","TEXT NOT NULL DEFAULT ''");
+            // writeCoreRows also populates the later design fields on very old snapshots.
+            for(String name:List.of("unit_id","variant_id","serial_imei","batch_number","received_at","warehouse_location","unit_status"))
+                addColumn("inventory_units",name,"TEXT");
             addColumn("order_lines","reserved_qty","INTEGER NOT NULL DEFAULT 0");
             addColumn("order_lines","allocated_qty","INTEGER NOT NULL DEFAULT 0");
             for(String name:List.of("customer_name","shipping_address","payment_method","idempotency_key","promotion_code",
@@ -150,6 +153,7 @@ final class LegacySqliteStore implements AutoCloseable {
                 s.execute("CREATE TABLE IF NOT EXISTS unit_allocations(serial TEXT PRIMARY KEY REFERENCES inventory_units(serial), order_id TEXT NOT NULL, product_id TEXT NOT NULL, FOREIGN KEY(order_id,product_id) REFERENCES order_lines(order_id,product_id))");
                 s.execute("CREATE TABLE IF NOT EXISTS recommendation_impressions(id TEXT PRIMARY KEY, request_id TEXT NOT NULL, customer_id TEXT NOT NULL REFERENCES customers(id), primary_id TEXT NOT NULL REFERENCES products(id), accessory_id TEXT NOT NULL REFERENCES products(id), rank_position INTEGER NOT NULL CHECK(rank_position>0), strategy TEXT NOT NULL, model_version TEXT NOT NULL, shown_at TEXT NOT NULL)");
             }
+            addColumn("recommendation_impressions","score","REAL");
             if(imported!=null) { imported.validateInventoryIntegrity(); imported.validateSupportIntegrity(); writeCoreRows(imported); }
             } finally { if(imported!=null) imported.closeRepository(); }
             db.commit();

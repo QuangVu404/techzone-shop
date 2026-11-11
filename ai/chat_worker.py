@@ -8,14 +8,23 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 ROOT=Path(__file__).resolve().parent.parent
-MODEL=ROOT/'models'/'qwen-chat'
-REVISION='989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
-if not (MODEL/'.techzone-ready').is_file() or (MODEL/'.techzone-ready').read_text(encoding='ascii').strip()!=REVISION:
+STRONG=ROOT/'models'/'qwen3-chat'
+STRONG_REVISION='cdbee75f17c01a7cc42f958dc650907174af0554'
+OLD=ROOT/'models'/'qwen-chat'
+OLD_REVISION='989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
+def ready(path, revision, weights):
+    marker=path/'.techzone-ready'
+    return marker.is_file() and marker.read_text(encoding='ascii').strip()==revision and all((path/name).is_file() for name in weights)
+if ready(STRONG,STRONG_REVISION,['model.safetensors.index.json','model-00001-of-00003.safetensors','model-00002-of-00003.safetensors','model-00003-of-00003.safetensors']):
+    MODEL,MODEL_NAME=STRONG,'Qwen3-4B-Instruct-2507'
+elif ready(OLD,OLD_REVISION,['model.safetensors']):
+    MODEL,MODEL_NAME=OLD,'Qwen2.5-1.5B-Instruct'
+else:
     raise RuntimeError('Model missing: run setup-chat-ai.bat')
 torch.set_num_threads(min(8,os.cpu_count() or 1))
 tokenizer=AutoTokenizer.from_pretrained(MODEL,local_files_only=True)
 model=AutoModelForCausalLM.from_pretrained(MODEL,local_files_only=True,torch_dtype=torch.float32).eval()
-print('READY\tQwen2.5-1.5B-Instruct',flush=True)
+print('READY\t'+MODEL_NAME,flush=True)
 
 SHOP_SYSTEM=('You are a friendly Vietnamese technology shopping assistant. Answer in natural Vietnamese, '
              'one or two short sentences. The application will show verified catalogue results separately. '

@@ -25,7 +25,7 @@ public final class BackendMain {
                 try(DemoStoreRepository old=DemoStoreRepository.open(legacy)) { initial=old.loadOrCreate(); }
             } else initial=new TechZoneStore();
             database=new SqliteStore(dbPath,initial);
-            database.importRealCatalog();
+            database.importBundledGearVNCatalog();
             database.importVerifiedManufacturerPair();
             database.importVerifiedRyzen7600Pairs();
             database.importVerifiedStorageFacts();

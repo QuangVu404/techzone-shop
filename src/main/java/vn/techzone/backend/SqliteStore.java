@@ -8,9 +8,11 @@ import vn.techzone.domain.TechZoneModels.*;
 import vn.techzone.infrastructure.DemoStoreRepository;
 
 import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.sql.*;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.util.*;
 
 /** Relational repository. Java serialization is used only for localhost transport, never for database storage. */
@@ -20,6 +22,7 @@ public final class SqliteStore implements AutoCloseable {
     private final Path dbPath;
     public record State(long revision,byte[] bytes) { }
     public record MarketOffer(String productId,String sourceSku,String url,long price,String availability,String fetchedAt) { }
+    private record PaymentEvidence(String orderId,String providerRef,String status,long amount,String capturedAt,String updatedAt) { }
 
     public static boolean hasState(Path path) throws Exception {
         if(!Files.exists(path))return false;
@@ -66,7 +69,8 @@ public final class SqliteStore implements AutoCloseable {
                 RelationalSchema.create(target);target.setAutoCommit(false);
                 try {
                     writeRows(target,state);
-                    writeMarketOffers(target,offers);
+                    writeMarketOffers(target,offers.stream().map(o->new MarketOffer(o.productId(),o.sourceSku(),
+                            o.url(),o.price(),o.availability(),o.fetchedAt())).toList());
                     try(PreparedStatement p=target.prepareStatement("UPDATE app_metadata SET revision=?,active_customer_id=? WHERE id=1")) {
                         p.setLong(1,revision);p.setString(2,storeCustomer(state));p.executeUpdate();
                     }
@@ -114,6 +118,69 @@ public final class SqliteStore implements AutoCloseable {
     }
 
     public synchronized void importRealCatalog() throws Exception { runSeed("catalog-real-v1",TechZoneStore::importRealCatalog); }
+    public synchronized int importBundledGearVNCatalog() throws Exception {
+        if(seedApplied("gearvn-catalog-snapshot-v1")) return 0;
+        try(InputStream input=SqliteStore.class.getResourceAsStream("/vn/techzone/catalog/gearvn-catalog.tsv")) {
+            if(input==null) throw new IOException("Thiếu ảnh chụp danh mục crawl GearVN đi kèm dự án.");
+            Path temporary=Files.createTempFile(dbPath.getParent(),".gearvn-catalog-",".tsv");
+            try {
+                Files.copy(input,temporary,StandardCopyOption.REPLACE_EXISTING);
+                int count=syncGearVNCatalog(temporary);
+                try(PreparedStatement p=db.prepareStatement("INSERT OR IGNORE INTO seed_migrations(name,applied_at) VALUES(?,?)")) {
+                    p.setString(1,"gearvn-catalog-snapshot-v1");p.setString(2,LocalDateTime.now().toString());p.executeUpdate();
+                }
+                return count;
+            } finally { Files.deleteIfExists(temporary); }
+        }
+    }
+    public synchronized int refreshGearVNCatalog(Path snapshot) throws Exception { return syncGearVNCatalog(snapshot); }
+    private boolean seedApplied(String name) throws SQLException {
+        try(PreparedStatement p=db.prepareStatement("SELECT 1 FROM seed_migrations WHERE name=?")) {
+            p.setString(1,name);try(ResultSet r=p.executeQuery()){return r.next();}
+        }
+    }
+    private int syncGearVNCatalog(Path snapshot) throws Exception {
+        List<TechZoneStore.GearVNCatalogProduct> listings=readGearVNCatalog(snapshot);
+        State old=read();TechZoneStore candidate=decode(old.bytes());
+        try {
+            candidate.syncGearVNCatalog(listings);
+            Map<String,MarketOffer> offers=new LinkedHashMap<>();
+            for(MarketOffer offer:marketOffers()) offers.put(offer.productId(),offer);
+            for(var listing:listings) offers.put(listing.id(),new MarketOffer(listing.id(),listing.sourceSku(),
+                    listing.sourceUrl(),listing.salePrice()>0?listing.salePrice():listing.price(),
+                    listing.availability(),Objects.toString(listing.specs().get("sourceFetchedAt"),"")));
+            save(candidate,old.revision(),new ArrayList<>(offers.values()));
+            return listings.size();
+        } finally { candidate.closeRepository(); }
+    }
+    private static List<TechZoneStore.GearVNCatalogProduct> readGearVNCatalog(Path snapshot) throws IOException {
+        List<TechZoneStore.GearVNCatalogProduct> result=new ArrayList<>();
+        try(BufferedReader reader=Files.newBufferedReader(snapshot,StandardCharsets.US_ASCII)) {
+            for(String line; (line=reader.readLine())!=null;) {
+                if(line.isBlank()) continue;
+                String[] encoded=line.split("\\t",-1);
+                if(encoded.length<26 || (encoded.length-12)%2!=0)
+                    throw new IOException("GearVN crawl TSV has an invalid row.");
+                String[] f=new String[encoded.length];
+                try { for(int i=0;i<encoded.length;i++) f[i]=new String(Base64.getDecoder().decode(encoded[i]),StandardCharsets.UTF_8); }
+                catch(IllegalArgumentException ex) { throw new IOException("GearVN crawl TSV contains invalid Base64.",ex); }
+                Map<String,String> specs=new LinkedHashMap<>();
+                for(int i=12;i<f.length;i+=2) if(specs.putIfAbsent(f[i],f[i+1])!=null)
+                    throw new IOException("GearVN crawl TSV contains duplicate specification keys.");
+                LocalDateTime fetchedAt;
+                try { fetchedAt=OffsetDateTime.parse(f[11]).toLocalDateTime(); }
+                catch(RuntimeException ex) { try { fetchedAt=LocalDateTime.parse(f[11]); }
+                    catch(RuntimeException invalid) { throw new IOException("GearVN crawl timestamp is invalid.",invalid); } }
+                long price,salePrice;
+                try { price=Long.parseLong(f[5]);salePrice=Long.parseLong(f[6]); }
+                catch(NumberFormatException ex) { throw new IOException("GearVN crawl price is invalid.",ex); }
+                result.add(new TechZoneStore.GearVNCatalogProduct(f[0],f[1],f[2],f[3],f[4],price,salePrice,
+                        f[7],f[8],f[9],f[10],fetchedAt,specs));
+            }
+        }
+        if(result.size()<50 || result.size()>500) throw new IOException("GearVN crawl snapshot is incomplete; existing data was kept.");
+        return List.copyOf(result);
+    }
     public synchronized void importVerifiedManufacturerPair() throws Exception { runSeed("verified-pair-am5-v1",s->s.seedVerifiedManufacturerPair()?1:0); }
     public synchronized void importVerifiedRyzen7600Pairs() throws Exception { runSeed("verified-pair-7600-v1",s->s.seedVerifiedRyzen7600Pairs()?1:0); }
     public synchronized void importVerifiedStorageFacts() throws Exception { runSeed("verified-m2-facts-v1",s->s.seedVerifiedStorageFacts()?1:0); }
@@ -158,15 +225,30 @@ public final class SqliteStore implements AutoCloseable {
     }
 
     public synchronized long save(TechZoneStore store,long expected) throws Exception {
+        return save(store,expected,marketOffers());
+    }
+    private synchronized long save(TechZoneStore store,long expected,List<MarketOffer> offers) throws Exception {
         store.validateInventoryIntegrity();store.validateSupportIntegrity();
         db.setAutoCommit(false);
         try {
+            List<PaymentEvidence> evidence=new ArrayList<>();
+            try(Statement s=db.createStatement();ResultSet r=s.executeQuery("SELECT order_id,provider_ref,payment_status,amount,captured_at,updated_at FROM payments")) {
+                while(r.next()) evidence.add(new PaymentEvidence(r.getString(1),r.getString(2),r.getString(3),r.getLong(4),r.getString(5),r.getString(6)));
+            }
             long next=expected+1;
             try(PreparedStatement p=db.prepareStatement("UPDATE app_metadata SET revision=?,active_customer_id=? WHERE id=1 AND revision=?")) {
                 p.setLong(1,next);p.setString(2,storeCustomer(store));p.setLong(3,expected<0?0:expected);
                 if(p.executeUpdate()!=1)throw new IllegalStateException("Dữ liệu đã thay đổi ở phiên khác; hãy tải lại ứng dụng.");
             }
-            writeRows(db,store);db.commit();return next;
+            writeRows(db,store);writeMarketOffers(db,offers);
+            try(PreparedStatement p=db.prepareStatement("UPDATE payments SET captured_at=?,updated_at=? WHERE order_id=? AND provider_ref=? AND payment_status=? AND amount=?")) {
+                for(PaymentEvidence e:evidence) {
+                    p.setString(1,e.capturedAt());p.setString(2,e.updatedAt());p.setString(3,e.orderId());
+                    p.setString(4,e.providerRef());p.setString(5,e.status());p.setLong(6,e.amount());p.addBatch();
+                }
+                p.executeBatch();
+            }
+            db.commit();return next;
         } catch(Exception ex){db.rollback();throw ex;}
         finally {db.setAutoCommit(true);}
     }
@@ -205,7 +287,7 @@ public final class SqliteStore implements AutoCloseable {
 
     private static void writeRows(Connection c,TechZoneStore store) throws Exception {
         try(Statement s=c.createStatement()) {
-            for(String table:List.of("provider_callbacks","recommendation_attributions","notification_deduplication","supplier_lead_times","store_settings","product_reviews","audit_entries","notifications","consultation_notes","shipment_events","warranty_verifications","market_offers","recommendation_impressions","interaction_events","compatibility_reviews","rma_cases","warranties","unit_allocations","payments","shipments","cart_items","shopping_carts","order_items","inventory_units","inventory_balances","sales_orders","compatibility_rules","product_variants","products","customers"))s.executeUpdate("DELETE FROM "+table);
+            for(String table:List.of("provider_callbacks","recommendation_attributions","notification_deduplication","supplier_lead_times","store_settings","product_reviews","audit_entries","notifications","restock_requests","supplier_returns","consultation_notes","shipment_events","warranty_verifications","market_offers","recommendation_impressions","interaction_events","compatibility_reviews","rma_cases","warranties","unit_allocations","payments","shipments","cart_items","shopping_carts","order_items","inventory_units","inventory_balances","sales_orders","compatibility_rules","product_variants","products","customers"))s.executeUpdate("DELETE FROM "+table);
         }
         TechZoneStore.RelationalAuxiliaryState aux=store.relationalAuxiliaryState();
         Map<String,Boolean> consent=aux.consents();
@@ -268,7 +350,7 @@ public final class SqliteStore implements AutoCloseable {
 
     private static String firstSpec(ProductVariant v){return v.specs.getOrDefault("capacity",v.specs.getOrDefault("storage","NOT_SPECIFIED"));}
     private static boolean terminalRma(String status){return Set.of("Hoàn tất","Từ chối","COMPLETED","REJECTED").contains(status);}
-    private static void writeMarketOffers(Connection c,List<LegacySqliteStore.MarketOffer> offers) throws SQLException {
+    private static void writeMarketOffers(Connection c,List<MarketOffer> offers) throws SQLException {
         try(PreparedStatement p=c.prepareStatement("INSERT OR REPLACE INTO market_offers(variant_id,source_sku,source_url,price,availability,fetched_at) VALUES(?,?,?,?,?,?)")) {
             for(var o:offers){p.setString(1,o.productId());p.setString(2,o.sourceSku());p.setString(3,o.url());p.setLong(4,o.price());p.setString(5,o.availability());p.setString(6,o.fetchedAt());p.addBatch();}p.executeBatch();
         }
@@ -325,7 +407,7 @@ public final class SqliteStore implements AutoCloseable {
         Map<String,Payment> payments=new HashMap<>();try(Statement s=db.createStatement();ResultSet r=s.executeQuery("SELECT payment_id,order_id,payment_method,provider_ref,idempotency_key,amount,currency_code,payment_status,authorized_at,captured_at,updated_at FROM payments")){while(r.next())payments.put(r.getString(2),new Payment(r.getString(1),r.getString(2),r.getString(3),r.getString(4),r.getString(5),r.getLong(6),r.getString(7),r.getString(8),time(r.getString(9)),time(r.getString(10)),time(r.getString(11))));}
         Map<String,Shipment> shipments=new HashMap<>();try(Statement s=db.createStatement();ResultSet r=s.executeQuery("SELECT shipment_id,order_id,tracking_code,carrier_name,package_weight_grams,package_dimensions,shipped_at,shipment_status,delivered_at FROM shipments")){while(r.next())shipments.put(r.getString(2),new Shipment(r.getString(1),r.getString(2),r.getString(3),r.getString(4),r.getLong(5),r.getString(6),time(r.getString(7)),r.getString(8),time(r.getString(9))));}
         Map<String,SalesOrder> orders=new LinkedHashMap<>();try(Statement s=db.createStatement();ResultSet r=s.executeQuery("SELECT order_id,order_number,customer_id,customer_name,shipping_address,payment_method,idempotency_key,promotion_code,created_at,order_status,total_amount,subtotal,discount,tax_amount,shipping_fee,payment_reference,tracking_code,carrier,package_weight_grams,package_dimensions,sales_verified_by,sales_verified_at,pending_reason,paid_at,delivered_at,reconciliation_due_at FROM sales_orders ORDER BY created_at")) {
-            while(r.next()){Payment payment=payments.get(r.getString(1));if(payment==null)throw new IOException("Thiếu payment cho đơn hàng "+r.getString(1));SalesOrder o=new SalesOrder(r.getString(1),r.getString(2),r.getString(3),r.getString(4),r.getString(5),payment.method(),r.getString(7),r.getString(8),time(r.getString(9)));o.status=OrderStatus.valueOf(r.getString(10));o.total=r.getLong(11);o.subtotal=r.getLong(12);o.discount=r.getLong(13);o.tax=r.getLong(14);o.shippingFee=r.getLong(15);o.paymentReference=payment.providerReference();o.trackingCode=r.getString(17);o.carrier=r.getString(18);o.packageWeightGrams=r.getInt(19);o.packageDimensions=r.getString(20);o.salesVerifiedBy=r.getString(21);o.salesVerifiedAt=time(r.getString(22));o.pendingReason=r.getString(23);o.paidAt=time(r.getString(24));o.deliveredAt=time(r.getString(25));o.reconciliationDueAt=time(r.getString(26));Shipment shipment=shipments.get(o.id);if(shipment!=null)o.shippedAt=shipment.shippedAt();orders.put(o.id,o);}
+            while(r.next()){Payment payment=payments.get(r.getString(1));if(payment==null)throw new IOException("Thiếu payment cho đơn hàng "+r.getString(1));SalesOrder o=new SalesOrder(r.getString(1),r.getString(2),r.getString(3),r.getString(4),r.getString(5),payment.method(),r.getString(7),r.getString(8),time(r.getString(9)));o.status=OrderStatus.valueOf(r.getString(10));o.total=r.getLong(11);o.subtotal=r.getLong(12);o.discount=r.getLong(13);o.tax=r.getLong(14);o.shippingFee=r.getLong(15);o.paymentReference=payment.providerReference();o.trackingCode=r.getString(17);o.carrier=r.getString(18);o.packageWeightGrams=r.getInt(19);o.packageDimensions=r.getString(20);o.salesVerifiedBy=r.getString(21);o.salesVerifiedAt=time(r.getString(22));o.pendingReason=r.getString(23);o.paidAt=time(r.getString(24));o.deliveredAt=time(r.getString(25));o.reconciliationDueAt=time(r.getString(26));Shipment shipment=shipments.get(o.id);if(shipment!=null){o.trackingCode=shipment.trackingCode();o.carrier=shipment.carrier();o.packageWeightGrams=Math.toIntExact(shipment.weightGrams());o.packageDimensions=shipment.dimensions();o.shippedAt=shipment.shippedAt();}orders.put(o.id,o);}
         }
         Map<String,OrderLine> orderLines=new HashMap<>();try(Statement s=db.createStatement();ResultSet r=s.executeQuery("SELECT order_id,variant_id,quantity,unit_price,reserved_qty,allocated_qty,discount_amount FROM order_items ORDER BY order_id,variant_id")){while(r.next()){SalesOrder o=orders.get(r.getString(1));if(o==null)throw new IOException("Order item không có order.");OrderLine line=new OrderLine(r.getString(2),r.getInt(3),r.getLong(4));line.reservedQuantity=r.getInt(5);line.allocatedQuantity=r.getInt(6);line.discountAmount=r.getLong(7);o.lines.add(line);orderLines.put(r.getString(1)+"|"+r.getString(2),line);}}
         List<InventoryUnit> units=new ArrayList<>();try(Statement s=db.createStatement();ResultSet r=s.executeQuery("SELECT unit_id,variant_id,serial_imei,batch_number,received_at,warehouse_location,unit_status,order_id FROM inventory_units ORDER BY unit_id")){while(r.next()){InventoryUnit u=new InventoryUnit(r.getString(3),r.getString(2),time(r.getString(5)),r.getString(4),r.getString(6));u.status=UnitStatus.valueOf(r.getString(7));u.orderId=r.getString(8);units.add(u);}}

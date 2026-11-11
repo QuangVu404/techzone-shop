@@ -10,6 +10,9 @@ if not exist .venv-ai\Scripts\python.exe python -m venv --system-site-packages .
 if errorlevel 1 exit /b %errorlevel%
 .venv-ai\Scripts\python.exe -m pip install -r ai\requirements.txt
 if errorlevel 1 exit /b %errorlevel%
+set TECHZONE_MODEL=bge-m3
 .venv-ai\Scripts\python.exe ai\download_models.py
+if errorlevel 1 exit /b %errorlevel%
+.venv-ai\Scripts\python.exe ai\download_strong_models.py
 if errorlevel 1 exit /b %errorlevel%
 echo AI setup complete.
